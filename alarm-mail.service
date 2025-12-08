@@ -1,0 +1,25 @@
+[Unit]
+Description=Alarm Mail Service
+Documentation=https://github.com/TimUx/alarm-mail
+After=network.target
+
+[Service]
+Type=simple
+User=alarm
+Group=alarm
+WorkingDirectory=/opt/alarm-mail
+Environment="PATH=/opt/alarm-mail/.venv/bin"
+EnvironmentFile=/opt/alarm-mail/.env
+ExecStart=/opt/alarm-mail/.venv/bin/gunicorn --bind 0.0.0.0:8000 "alarm_mail.app:create_app()" --workers 1 --threads 4 --worker-class gthread
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/alarm-mail
+
+[Install]
+WantedBy=multi-user.target
