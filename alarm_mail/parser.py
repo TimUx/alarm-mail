@@ -144,7 +144,7 @@ def _parse_incident_xml(body: str) -> Optional[Dict[str, Any]]:
         keyword_display_parts.append(diagnosis)
     keyword_display = " – ".join(part for part in keyword_display_parts if part)
 
-    alarm: Dict[str, Optional[str]] = {
+    alarm: Dict[str, Any] = {
         **timestamp_values,
         "incident_number": incident_number,
         "keyword": keyword_display or keyword_primary,

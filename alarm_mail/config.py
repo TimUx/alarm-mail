@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import os
 import logging
-from dataclasses import dataclass, field
-from typing import List, Optional, cast
+from dataclasses import dataclass
+from typing import Optional, cast
 
 try:
     from dotenv import load_dotenv

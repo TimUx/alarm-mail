@@ -77,6 +77,10 @@ class AlarmMailFetcher:
                 LOGGER.warning("IMAP search failed with response: %s", typ)
                 return
 
+            if not data or not data[0]:
+                LOGGER.debug("No messages found matching criteria")
+                return
+
             uids = [int(uid) for uid in data[0].split() if uid]
             for uid in sorted(uids):
                 if self._state.last_uid is not None and uid <= self._state.last_uid:
