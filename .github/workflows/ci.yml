@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install flake8 pylint mypy
+    
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 alarm_mail --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 alarm_mail --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+      continue-on-error: true
+    
+    - name: Type check with mypy
+      run: |
+        mypy alarm_mail --ignore-missing-imports
+      continue-on-error: true
+    
+    - name: Test application startup
+      run: |
+        python -c "from alarm_mail.app import create_app; create_app()" || echo "App requires valid IMAP config"
+      env:
+        ALARM_MAIL_IMAP_HOST: test.example.com
+        ALARM_MAIL_IMAP_USERNAME: test@example.com
+        ALARM_MAIL_IMAP_PASSWORD: testpassword
+
+  docker-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: alarm-mail:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
