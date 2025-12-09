@@ -1,120 +1,197 @@
-# Schnellstart Anleitung - alarm-mail
+# ⚡ Schnellstart - alarm-mail
 
-Diese Kurzanleitung hilft Ihnen, den alarm-mail Service in wenigen Minuten zu starten.
+Diese Anleitung hilft Ihnen, den alarm-mail Service **in 5 Minuten** einzurichten und zu starten.
 
-## Voraussetzungen
+> 💡 **Tipp:** Für detaillierte Informationen siehe die vollständige [README.md](README.md)
 
-- Docker und Docker Compose (empfohlen) ODER
-- Python 3.11+ mit pip und venv
+---
 
-## Option 1: Docker (Empfohlen)
+## 📋 Voraussetzungen
 
-### Schritt 1: Projekt klonen
+Wählen Sie eine der beiden Optionen:
+
+### Option A: Docker (Empfohlen) 🐋
+- ✅ Docker 20.10 oder höher
+- ✅ Docker Compose v2.0 oder höher
+
+### Option B: Native Python 🐍
+- ✅ Python 3.11 oder höher
+- ✅ pip und venv
+
+**Plus in beiden Fällen:**
+- ✅ IMAP-Postfach mit Zugangsdaten
+- ✅ Optional: laufende Instanzen von alarm-monitor und/oder alarm-messenger
+
+---
+
+## 🚀 Option 1: Docker (Empfohlen)
+
+**Geschätzte Zeit:** ⏱️ 3 Minuten
+
+### Schritt 1️⃣: Repository klonen
+
 ```bash
 git clone https://github.com/TimUx/alarm-mail.git
 cd alarm-mail
 ```
 
-### Schritt 2: Konfiguration erstellen
+### Schritt 2️⃣: Konfiguration erstellen
+
 ```bash
 cp .env.example .env
-nano .env  # oder ein anderer Editor
+nano .env  # oder Ihr bevorzugter Editor (vim, code, etc.)
 ```
 
-Minimal erforderliche Konfiguration:
+**Minimal erforderliche Einstellungen:**
+
 ```bash
-# IMAP Zugangsdaten (Pflicht)
+# IMAP-Zugangsdaten (PFLICHT)
 ALARM_MAIL_IMAP_HOST=imap.ihremailserver.de
 ALARM_MAIL_IMAP_USERNAME=alarm@ihre-feuerwehr.de
 ALARM_MAIL_IMAP_PASSWORD=IhrPasswort
 
-# Optional: alarm-monitor
-ALARM_MAIL_ALARM_MONITOR_URL=http://alarm-monitor:8000
-ALARM_MAIL_ALARM_MONITOR_API_KEY=ihr-monitor-api-key
+# Optional: Integration mit alarm-monitor
+#ALARM_MAIL_ALARM_MONITOR_URL=http://alarm-monitor:8000
+#ALARM_MAIL_ALARM_MONITOR_API_KEY=ihr-monitor-api-key
 
-# Optional: alarm-messenger
-ALARM_MAIL_ALARM_MESSENGER_URL=http://alarm-messenger:3000
-ALARM_MAIL_ALARM_MESSENGER_API_KEY=ihr-messenger-api-key
+# Optional: Integration mit alarm-messenger
+#ALARM_MAIL_ALARM_MESSENGER_URL=http://alarm-messenger:3000
+#ALARM_MAIL_ALARM_MESSENGER_API_KEY=ihr-messenger-api-key
 ```
 
-### Schritt 3: Service starten
+💡 **Hinweis:** Für die Integrationen müssen URL **und** API-Key gesetzt sein.
+
+### Schritt 3️⃣: Service starten
+
 ```bash
 docker compose up -d
 ```
 
-### Schritt 4: Status prüfen
+Das war's! 🎉 Der Service baut das Image und startet im Hintergrund.
+
+### Schritt 4️⃣: Status überprüfen
+
 ```bash
-# Logs anzeigen
-docker compose logs -f
+# Live-Logs anzeigen
+docker compose logs -f alarm-mail
 
 # Health-Check
 curl http://localhost:8000/health
+# Expected: {"status":"ok","service":"alarm-mail"}
+
+# Service-Info
+curl http://localhost:8000/
+# Zeigt konfigurierte Targets und Polling-Intervall
 ```
 
-✅ Fertig! Der Service läuft jetzt und überwacht Ihr E-Mail-Postfach.
+✅ **Fertig!** Der Service läuft jetzt und überwacht Ihr E-Mail-Postfach.
 
-## Option 2: Native Installation
+---
 
-### Schritt 1: Projekt klonen und Setup
+## 🐍 Option 2: Native Python-Installation
+
+**Geschätzte Zeit:** ⏱️ 5-7 Minuten
+
+### Schritt 1️⃣: Projekt klonen und Python-Umgebung einrichten
+
 ```bash
+# Repository klonen
 git clone https://github.com/TimUx/alarm-mail.git
 cd alarm-mail
+
+# Virtual Environment erstellen
 python3 -m venv .venv
-source .venv/bin/activate
+
+# Environment aktivieren
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate   # Windows
+
+# Dependencies installieren
 pip install -r requirements.txt
 ```
 
-### Schritt 2: Konfiguration erstellen
+### Schritt 2️⃣: Konfiguration erstellen
+
 ```bash
 cp .env.example .env
-nano .env  # Zugangsdaten eintragen
+nano .env  # Ihre Zugangsdaten eintragen
 ```
 
-### Schritt 3: Service starten
+Siehe Option 1, Schritt 2 für die erforderlichen Einstellungen.
+
+### Schritt 3️⃣: Service starten
+
+**Für Entwicklung/Testing:**
+```bash
+flask --app alarm_mail.app run --host 0.0.0.0 --port 8000
+```
+
+**Für Produktion (mit Gunicorn):**
 ```bash
 gunicorn --bind 0.0.0.0:8000 "alarm_mail.app:create_app()" --workers 1 --threads 4
 ```
 
-### Schritt 4 (Optional): Als Systemd-Dienst einrichten
+✅ **Service läuft!** Öffnen Sie http://localhost:8000 im Browser.
+
+### Schritt 4️⃣ (Optional): Als Systemd-Dienst einrichten
+
+Für automatischen Start beim Systemstart:
+
 ```bash
-# Service-Datei anpassen
+# Service-Datei kopieren und anpassen
 sudo cp alarm-mail.service /etc/systemd/system/
 sudo nano /etc/systemd/system/alarm-mail.service
 
-# Dienst aktivieren
+# Pfade in der Service-Datei anpassen:
+# WorkingDirectory=/opt/alarm-mail
+# EnvironmentFile=/opt/alarm-mail/.env
+# ExecStart=/opt/alarm-mail/.venv/bin/gunicorn ...
+
+# Dienst aktivieren und starten
 sudo systemctl daemon-reload
 sudo systemctl enable alarm-mail
 sudo systemctl start alarm-mail
 
 # Status prüfen
 sudo systemctl status alarm-mail
+
+# Logs ansehen
+sudo journalctl -u alarm-mail -f
 ```
 
-## Integration mit anderen Services
+---
 
-### Mit alarm-monitor
+## 🔗 Integration mit anderen Services
 
-1. Stellen Sie sicher, dass alarm-monitor läuft
-2. Konfigurieren Sie die URL und API-Key in `.env`:
-   ```bash
-   ALARM_MAIL_ALARM_MONITOR_URL=http://alarm-monitor:8000
-   ALARM_MAIL_ALARM_MONITOR_API_KEY=monitor-key
-   ```
-3. Alarm-monitor muss einen `/api/alarm` Endpunkt bereitstellen
+### Mit alarm-monitor verbinden
 
-### Mit alarm-messenger
+**Voraussetzungen:**
+- alarm-monitor läuft und ist erreichbar
+- API-Key ist in alarm-monitor konfiguriert (`ALARM_DASHBOARD_API_KEY`)
 
-1. Stellen Sie sicher, dass alarm-messenger läuft
-2. Konfigurieren Sie die URL und API-Key in `.env`:
-   ```bash
-   ALARM_MAIL_ALARM_MESSENGER_URL=http://alarm-messenger:3000
-   ALARM_MAIL_ALARM_MESSENGER_API_KEY=messenger-key
-   ```
-3. Der alarm-messenger `/api/emergencies` Endpunkt wird automatisch genutzt
+**Konfiguration in alarm-mail `.env`:**
+```bash
+ALARM_MAIL_ALARM_MONITOR_URL=http://alarm-monitor:8000
+ALARM_MAIL_ALARM_MONITOR_API_KEY=gleicher-key-wie-im-monitor
+```
 
-## Gemeinsames Docker Compose Setup
+**Wichtig:** API-Keys müssen übereinstimmen!
 
-Für ein All-in-One Setup erstellen Sie eine `docker-compose.yaml`:
+### Mit alarm-messenger verbinden
+
+**Voraussetzungen:**
+- alarm-messenger läuft und ist erreichbar
+- API-Key ist in alarm-messenger konfiguriert (`API_SECRET_KEY`)
+
+**Konfiguration in alarm-mail `.env`:**
+```bash
+ALARM_MAIL_ALARM_MESSENGER_URL=http://alarm-messenger:3000
+ALARM_MAIL_ALARM_MESSENGER_API_KEY=gleicher-key-wie-im-messenger
+```
+
+### All-in-One Setup (Alle Services zusammen)
+
+Erstellen Sie eine gemeinsame `docker-compose.yaml` für alle drei Services:
 
 ```yaml
 version: '3.8'
@@ -123,69 +200,192 @@ services:
   alarm-mail:
     build: ./alarm-mail
     restart: unless-stopped
-    environment:
-      - ALARM_MAIL_IMAP_HOST=imap.example.com
-      - ALARM_MAIL_IMAP_USERNAME=alarm@example.com
-      - ALARM_MAIL_IMAP_PASSWORD=${IMAP_PASSWORD}
-      - ALARM_MAIL_ALARM_MONITOR_URL=http://alarm-monitor:8000
-      - ALARM_MAIL_ALARM_MONITOR_API_KEY=${MONITOR_API_KEY}
-      - ALARM_MAIL_ALARM_MESSENGER_URL=http://alarm-messenger:3000
-      - ALARM_MAIL_ALARM_MESSENGER_API_KEY=${MESSENGER_API_KEY}
+    env_file:
+      - ./alarm-mail/.env
     depends_on:
       - alarm-monitor
       - alarm-messenger
+    networks:
+      - alarm-network
 
   alarm-monitor:
-    image: alarm-monitor:latest
+    build: ./alarm-monitor
     restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
-      - ALARM_DASHBOARD_API_KEY=${MONITOR_API_KEY}
+    env_file:
+      - ./alarm-monitor/.env
+    networks:
+      - alarm-network
 
   alarm-messenger:
-    image: alarm-messenger:latest
+    build: ./alarm-messenger/server
     restart: unless-stopped
     ports:
       - "3000:3000"
-    environment:
-      - API_SECRET_KEY=${MESSENGER_API_KEY}
+    env_file:
+      - ./alarm-messenger/.env
+    networks:
+      - alarm-network
+
+networks:
+  alarm-network:
+    driver: bridge
 ```
 
-Starten mit:
+**Starten:**
 ```bash
 docker compose up -d
+docker compose logs -f
 ```
 
-## Fehlerbehebung
+---
 
-### Service startet nicht
+## 🔧 Fehlerbehebung
+
+### ❌ Service startet nicht
+
 ```bash
-# Logs prüfen
+# Docker: Logs prüfen
 docker compose logs alarm-mail
 
-# Oder bei nativer Installation
+# Native: Systemd-Logs prüfen
 sudo journalctl -u alarm-mail -f
+
+# Konfiguration prüfen
+cat .env | grep -v PASSWORD  # Ohne Passwörter
 ```
 
-### IMAP-Verbindung schlägt fehl
-- Prüfen Sie Benutzername und Passwort
-- Testen Sie die Verbindung: `telnet imap.ihremailserver.de 993`
-- Prüfen Sie Firewall-Regeln
+**Häufige Ursachen:**
+- Fehlende Pflicht-Variablen (IMAP_HOST, USERNAME, PASSWORD)
+- Syntax-Fehler in .env
+- Port bereits belegt
 
-### Push zu Targets schlägt fehl
-- Prüfen Sie, ob die Target-Services laufen
-- Testen Sie die Erreichbarkeit: `curl http://target-url/health`
-- Prüfen Sie die API-Keys
+### ❌ IMAP-Verbindung schlägt fehl
 
-## Nächste Schritte
+```bash
+# Verbindung testen
+telnet imap.ihremailserver.de 993
 
-- Lesen Sie die vollständige [README.md](README.md) für Details
-- Konfigurieren Sie zusätzliche Optionen in `.env`
-- Richten Sie Monitoring und Backups ein
-- Testen Sie mit Test-E-Mails
+# Oder mit OpenSSL
+openssl s_client -connect imap.ihremailserver.de:993
 
-## Support
+# Logs anschauen
+docker compose logs alarm-mail | grep -i imap
+```
 
-Bei Problemen öffnen Sie ein Issue auf GitHub:
-https://github.com/TimUx/alarm-mail/issues
+**Häufige Ursachen:**
+- Falsche Zugangsdaten
+- Firewall blockiert Port 993
+- 2FA aktiviert (App-Passwort benötigt)
+- SSL/TLS-Zertifikat-Problem
+
+**Lösungsansätze:**
+```bash
+# App-Passwort für Gmail/Outlook verwenden
+# SSL temporär deaktivieren (nur zum Testen!)
+ALARM_MAIL_IMAP_USE_SSL=false
+ALARM_MAIL_IMAP_PORT=143
+```
+
+### ❌ Push zu Targets schlägt fehl
+
+```bash
+# Erreichbarkeit prüfen
+curl http://alarm-monitor:8000/health
+curl http://alarm-messenger:3000/api/health
+
+# Logs checken
+docker compose logs alarm-mail | grep -i "push"
+docker compose logs alarm-mail | grep -i "error"
+```
+
+**Häufige Ursachen:**
+- API-Keys stimmen nicht überein
+- Target-Service läuft nicht
+- Falsche URL (z.B. localhost statt Service-Name in Docker)
+
+**Lösung:**
+```bash
+# In Docker Compose: Service-Namen verwenden!
+# ✅ Richtig:
+ALARM_MAIL_ALARM_MONITOR_URL=http://alarm-monitor:8000
+
+# ❌ Falsch (im Docker-Netzwerk):
+ALARM_MAIL_ALARM_MONITOR_URL=http://localhost:8000
+```
+
+### ❌ E-Mails werden nicht verarbeitet
+
+```bash
+# Suchkriterium überprüfen
+docker compose logs alarm-mail | grep "Searching for messages"
+
+# Temporär alle E-Mails abrufen (zum Testen)
+ALARM_MAIL_IMAP_SEARCH=ALL
+```
+
+**Mögliche Ursachen:**
+- Alle E-Mails bereits gelesen (UNSEEN findet nichts)
+- Falscher Mailbox-Name
+- E-Mail-Format wird nicht erkannt
+
+---
+
+## 📚 Nächste Schritte
+
+✅ Service läuft? Großartig! Jetzt können Sie:
+
+1. **Dokumentation lesen**
+   - [README.md](README.md) - Vollständige Dokumentation
+   - Konfigurationsoptionen erkunden
+   - Sicherheits-Best-Practices umsetzen
+
+2. **Test-Alarm senden**
+   - E-Mail mit Test-XML an Postfach senden
+   - Logs beobachten: `docker compose logs -f alarm-mail`
+   - Verarbeitung im Dashboard / Messenger prüfen
+
+3. **Monitoring einrichten**
+   - Health-Checks konfigurieren
+   - Log-Rotation einrichten
+   - Alerting für Fehler aufsetzen
+
+4. **Produktion vorbereiten**
+   - Starke API-Keys generieren
+   - SSL/TLS für IMAP aktivieren
+   - Firewall-Regeln konfigurieren
+   - Backup-Strategie definieren
+
+5. **Integrationen erweitern**
+   - alarm-monitor einrichten
+   - alarm-messenger konfigurieren
+   - Beide Systeme gleichzeitig nutzen
+
+---
+
+## 💬 Hilfe benötigt?
+
+### 📖 Dokumentation
+- [README.md](README.md) - Vollständige Dokumentation
+- [GitHub Repository](https://github.com/TimUx/alarm-mail)
+
+### 🐛 Bug gefunden?
+- [Issue erstellen](https://github.com/TimUx/alarm-mail/issues/new)
+
+### 💡 Fragen?
+- [GitHub Discussions](https://github.com/TimUx/alarm-mail/discussions)
+
+### 🔗 Verwandte Projekte
+- [alarm-monitor](https://github.com/TimUx/alarm-monitor) - Dashboard für Einsatzanzeige
+- [alarm-messenger](https://github.com/TimUx/alarm-messenger) - Mobile Alarmierung
+
+---
+
+<div align="center">
+
+**Viel Erfolg mit alarm-mail! 🚒🚨**
+
+[⬆️ Nach oben](#-schnellstart---alarm-mail)
+
+</div>
