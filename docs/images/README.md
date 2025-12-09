@@ -151,13 +151,15 @@ Sie möchten Screenshots oder Diagramme beitragen?
 5. Referenzieren Sie die Bilder in der Dokumentation
 
 ### Referenzierung in Markdown
+
+Von der Root-Ebene (README.md):
 ```markdown
 ![Beschreibung](docs/images/dateiname.png)
 ```
 
-Relativ von README.md:
+Von docs/ Verzeichnis (docs/API.md):
 ```markdown
-![Beschreibung](docs/images/dateiname.png)
+![Beschreibung](images/dateiname.png)
 ```
 
 ## Lizenz

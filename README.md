@@ -1607,10 +1607,16 @@ Vor dem Produktiv-Einsatz:
 Wenn Sie eine Sicherheitslücke entdecken:
 
 1. **NICHT** als öffentliches Issue melden
-2. E-Mail an: [security@example.com] (oder GitHub Security Advisory nutzen)
-3. Detaillierte Beschreibung der Schwachstelle
-4. Proof-of-Concept (falls möglich)
+2. Nutzen Sie [GitHub Security Advisories](https://github.com/TimUx/alarm-mail/security/advisories/new) für vertrauliche Meldungen
+3. Oder erstellen Sie ein privates Security Issue auf GitHub
+4. Fügen Sie hinzu:
+   - Detaillierte Beschreibung der Schwachstelle
+   - Proof-of-Concept (falls möglich)
+   - Betroffene Versionen
+   - Vorgeschlagene Fixes (optional)
 5. Verantwortungsvolle Offenlegung (Responsible Disclosure)
+
+Wir werden uns bemühen, innerhalb von 48 Stunden zu antworten und zeitnah einen Fix bereitzustellen.
 
 ---
 
