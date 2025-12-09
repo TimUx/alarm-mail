@@ -108,7 +108,7 @@ Pull Requests für Bugfixes und Features sind willkommen!
 
 ```bash
 # Repository forken und klonen
-git clone https://github.com/IHR-USERNAME/alarm-mail.git
+git clone https://github.com/YOUR-USERNAME/alarm-mail.git
 cd alarm-mail
 
 # Virtual Environment erstellen

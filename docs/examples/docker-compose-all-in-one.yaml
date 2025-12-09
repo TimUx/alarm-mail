@@ -41,6 +41,7 @@ services:
     networks:
       - alarm-network
     healthcheck:
+      # Hinweis: curl ist im alarm-mail Dockerfile bereits installiert (Zeile 9)
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 5s
@@ -124,7 +125,9 @@ services:
     environment:
       - POSTGRES_DB=messenger
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      # ⚠️ WICHTIG: Setzen Sie POSTGRES_PASSWORD in der .env Datei!
+      # Default 'postgres' ist NICHT sicher und nur für lokale Tests!
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Fehler: POSTGRES_PASSWORD muss in .env gesetzt sein}
       - PGDATA=/var/lib/postgresql/data/pgdata
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -203,7 +206,8 @@ networks:
 #    # Gemeinsamer API-Key für alle Services
 #    API_KEY_SHARED=ihr-sehr-geheimer-api-key-mindestens-32-zeichen-lang
 #    
-#    # PostgreSQL Passwort
+#    # PostgreSQL Passwort (PFLICHT!)
+#    # ⚠️ Muss gesetzt sein, kein Default-Wert aus Sicherheitsgründen
 #    POSTGRES_PASSWORD=sicheres-postgres-passwort
 #
 # 2. Verzeichnisstruktur:
