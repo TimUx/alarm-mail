@@ -58,6 +58,9 @@ class AlarmMailFetcher:
 
     # pylint: disable=too-many-locals
     def _poll_once(self) -> None:
+        """Connect to the IMAP server, fetch new messages, invoke the callback, and mark each
+        processed message as read (\\Seen flag) on the server.  Failures when marking a message
+        as read are logged but do not abort processing of remaining messages."""
         config = self.config
         LOGGER.debug("Connecting to IMAP server %s", config.host)
         if config.use_ssl:
@@ -90,7 +93,14 @@ class AlarmMailFetcher:
                     continue
                 raw_email = message_data[0][1]
                 self.callback(raw_email)
-                server.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+                try:
+                    server.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+                except Exception as mark_exc:
+                    LOGGER.warning(
+                        "Failed to mark message UID %s as read: %s",
+                        uid.decode() if isinstance(uid, bytes) else uid,
+                        mark_exc,
+                    )
         finally:
             try:
                 server.logout()

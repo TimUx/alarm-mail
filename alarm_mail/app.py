@@ -150,13 +150,13 @@ def create_app() -> Flask:
     def health():
         """Health check endpoint."""
         fetcher: Optional[AlarmMailFetcher] = alarm_app.mail_fetcher
-        if fetcher is not None and fetcher._thread is not None:
-            if not fetcher._thread.is_alive():
-                return jsonify({
-                    "status": "degraded",
-                    "reason": "mail polling thread not running",
-                }), 503
-        return jsonify({"status": "ok", "service": "alarm-mail"})
+        if (
+            fetcher is not None
+            and fetcher._thread is not None
+            and fetcher._thread.is_alive()
+        ):
+            return jsonify({"status": "ok", "polling": "running"})
+        return jsonify({"status": "degraded", "polling": "stopped"}), 503
 
     @app.route("/")
     def index():
