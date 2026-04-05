@@ -1,0 +1,7 @@
+flake8
+pylint
+mypy
+types-requests
+pytest
+pytest-mock
+requests-mock
