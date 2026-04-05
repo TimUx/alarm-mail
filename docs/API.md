@@ -197,7 +197,6 @@ Vollständiges Alarm-Daten-Objekt:
   "keyword_primary": "F3Y",
   "keyword_secondary": "Personen in Gefahr",
   "diagnosis": "Brand in Wohngebäude",
-  "description": "Brand in Wohngebäude",
   "remark": "Starke Rauchentwicklung im 2. OG",
   "location": "Hauptstraße 123, Nordviertel, Musterstadt",
   "location_details": {
@@ -242,7 +241,6 @@ Vollständiges Alarm-Daten-Objekt:
 | `keyword_primary` | String | Ja | Hauptstichwort (z.B. "F3Y") |
 | `keyword_secondary` | String | Ja | Unterstichwort |
 | `diagnosis` | String | Ja | Einsatzdiagnose |
-| `description` | String | Ja | Einsatzbeschreibung |
 | `remark` | String | Ja | Bemerkungen |
 | `location` | String | Ja | Vollständige Ortsangabe |
 | `location_details` | Object | Ja | Strukturierte Ortsinformationen |
@@ -368,7 +366,7 @@ alarm-mail konvertiert automatisch:
 | `incident_number` | `emergencyNumber` |
 | `timestamp` | `emergencyDate` |
 | `keyword_primary` | `emergencyKeyword` |
-| `diagnosis` oder `description` | `emergencyDescription` |
+| `diagnosis` | `emergencyDescription` |
 | `location` | `emergencyLocation` |
 | `dispatch_group_codes` (Array) | `groups` (String, kommasepariert) |
 

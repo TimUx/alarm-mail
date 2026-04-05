@@ -5,25 +5,87 @@ from __future__ import annotations
 import email
 import email.policy
 from datetime import datetime
+from html.parser import HTMLParser
+import html
 import re
 from typing import Any, Dict, List, Optional
 
 import defusedxml.ElementTree as ET
 
 
+class IncidentTags:
+    """XML tag name constants for Leitstelle INCIDENT payloads."""
+
+    ENR = "ENR"
+    ESTICHWORT_1 = "ESTICHWORT_1"
+    ESTICHWORT_2 = "ESTICHWORT_2"
+    STICHWORT = "STICHWORT"
+    DIAGNOSE = "DIAGNOSE"
+    EO_BEMERKUNG = "EO_BEMERKUNG"
+    EOZUSATZ = "EOZUSATZ"
+    EBEGINN = "EBEGINN"
+    STRASSE = "STRASSE"
+    HAUSNUMMER = "HAUSNUMMER"
+    ORTSTEIL = "ORTSTEIL"
+    ORT = "ORT"
+    OBJEKT = "OBJEKT"
+    ORTSZUSATZ = "ORTSZUSATZ"
+    AAO = "AAO"
+    EINSATZMASSNAHMEN = "EINSATZMASSNAHMEN"
+    TME = "TME"
+    BEZEICHNUNG = "BEZEICHNUNG"
+    KOORDINATE_LAT = "KOORDINATE_LAT"
+    KOORDINATE_LON = "KOORDINATE_LON"
+
+
+class _HTMLStripper(HTMLParser):
+    """Simple HTML parser that strips tags and collects text content."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: List[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self._parts.append(data)
+
+    def get_text(self) -> str:
+        return "".join(self._parts)
+
+
+def _strip_html(raw: str) -> str:
+    """Strip HTML tags and unescape HTML entities from *raw*."""
+    unescaped = html.unescape(raw)
+    stripper = _HTMLStripper()
+    stripper.feed(unescaped)
+    return stripper.get_text()
+
+
 def _parse_body(message: email.message.Message) -> str:
-    """Extract a text body from the email message."""
+    """Extract a text body from the email message.
+
+    Prefers ``text/plain`` parts; falls back to ``text/html`` (with tags
+    stripped) when no plain-text part is available.
+    """
 
     if message.is_multipart():
+        html_fallback: Optional[str] = None
         for part in message.walk():
             content_type = part.get_content_type()
             if content_type == "text/plain":
                 charset = part.get_content_charset() or "utf-8"
                 return part.get_payload(decode=True).decode(charset, errors="replace")
+            if content_type == "text/html" and html_fallback is None:
+                charset = part.get_content_charset() or "utf-8"
+                raw_html = part.get_payload(decode=True).decode(charset, errors="replace")
+                html_fallback = _strip_html(raw_html)
+        return html_fallback or ""
     else:
+        content_type = message.get_content_type()
         charset = message.get_content_charset() or "utf-8"
-        return message.get_payload(decode=True).decode(charset, errors="replace")
-    return ""
+        text = message.get_payload(decode=True).decode(charset, errors="replace")
+        if content_type == "text/html":
+            return _strip_html(text)
+        return text
 
 
 def _parse_timestamp(value: Optional[str]) -> Dict[str, Optional[str]]:
@@ -79,28 +141,28 @@ def _parse_incident_xml(body: str) -> Optional[Dict[str, Any]]:
     def get_text(name: str) -> Optional[str]:
         return _extract_text(root.find(name))
 
-    incident_number = get_text("ENR")
-    keyword_primary = get_text("ESTICHWORT_1") or get_text("STICHWORT")
-    keyword_secondary = get_text("ESTICHWORT_2")
-    diagnosis = get_text("DIAGNOSE")
-    remark = get_text("EO_BEMERKUNG") or get_text("EOZUSATZ")
+    incident_number = get_text(IncidentTags.ENR)
+    keyword_primary = get_text(IncidentTags.ESTICHWORT_1) or get_text(IncidentTags.STICHWORT)
+    keyword_secondary = get_text(IncidentTags.ESTICHWORT_2)
+    diagnosis = get_text(IncidentTags.DIAGNOSE)
+    remark = get_text(IncidentTags.EO_BEMERKUNG) or get_text(IncidentTags.EOZUSATZ)
 
-    timestamp_values = _parse_timestamp(get_text("EBEGINN"))
+    timestamp_values = _parse_timestamp(get_text(IncidentTags.EBEGINN))
 
-    street = get_text("STRASSE")
-    house_number = get_text("HAUSNUMMER")
+    street = get_text(IncidentTags.STRASSE)
+    house_number = get_text(IncidentTags.HAUSNUMMER)
     street_line = " ".join(part for part in [street, house_number] if part)
-    village = get_text("ORTSTEIL")
-    town = get_text("ORT")
-    object_name = get_text("OBJEKT")
-    additional = get_text("ORTSZUSATZ")
+    village = get_text(IncidentTags.ORTSTEIL)
+    town = get_text(IncidentTags.ORT)
+    object_name = get_text(IncidentTags.OBJEKT)
+    additional = get_text(IncidentTags.ORTSZUSATZ)
 
     location_parts = [street_line or object_name, additional, village, town]
     location = ", ".join(part for part in location_parts if part)
     if not location:
         location = town or village or street_line or object_name
 
-    groups_text = get_text("AAO")
+    groups_text = get_text(IncidentTags.AAO)
     aao_groups: List[str] = []
     if groups_text:
         aao_groups = [part.strip() for part in groups_text.split(";") if part.strip()]
@@ -108,11 +170,11 @@ def _parse_incident_xml(body: str) -> Optional[Dict[str, Any]]:
     dispatch_groups: List[str] = []
     dispatch_codes: List[str] = []
 
-    einsatz = root.find("EINSATZMASSNAHMEN")
+    einsatz = root.find(IncidentTags.EINSATZMASSNAHMEN)
     if einsatz is not None:
-        tme = einsatz.find("TME")
+        tme = einsatz.find(IncidentTags.TME)
         if tme is not None:
-            for child in tme.findall("BEZEICHNUNG"):
+            for child in tme.findall(IncidentTags.BEZEICHNUNG):
                 text = _extract_text(child)
                 if text:
                     dispatch_groups.append(text)
@@ -128,8 +190,8 @@ def _parse_incident_xml(body: str) -> Optional[Dict[str, Any]]:
     groups: Optional[List[str]]
     groups = combined_groups if combined_groups else None
 
-    lat = get_text("KOORDINATE_LAT")
-    lon = get_text("KOORDINATE_LON")
+    lat = get_text(IncidentTags.KOORDINATE_LAT)
+    lon = get_text(IncidentTags.KOORDINATE_LON)
     try:
         latitude = float(lat) if lat else None
     except ValueError:
@@ -152,7 +214,6 @@ def _parse_incident_xml(body: str) -> Optional[Dict[str, Any]]:
         "keyword_secondary": keyword_secondary,
         "diagnosis": diagnosis,
         "remark": remark,
-        "description": diagnosis,
         "aao_groups": aao_groups or None,
         "groups": groups,
         "dispatch_groups": dispatch_groups or None,
@@ -190,4 +251,4 @@ def parse_alarm(raw_email: bytes) -> Optional[Dict[str, Any]]:
     return xml_alarm
 
 
-__all__ = ["parse_alarm"]
+__all__ = ["parse_alarm", "IncidentTags"]

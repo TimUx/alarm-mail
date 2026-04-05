@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, cast
 
 try:
@@ -20,6 +20,23 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency fallback
         """Fallback shim if python-dotenv is not installed."""
 
         return False
+
+
+class SecretString:
+    """Wrapper that stores a secret string value but masks it in repr/str."""
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def get_secret_value(self) -> str:
+        """Return the actual secret string."""
+        return self._value
+
+    def __repr__(self) -> str:
+        return "***"
+
+    def __str__(self) -> str:
+        return "***"
 
 
 @dataclass
@@ -40,7 +57,7 @@ class TargetConfig:
     """Configuration for a push target (alarm-monitor or alarm-messenger)."""
 
     url: str
-    api_key: str
+    api_key: SecretString
     enabled: bool = True
 
 
@@ -61,6 +78,10 @@ class MissingConfiguration(RuntimeError):
 ENV_PREFIX = "ALARM_MAIL_"
 
 LOGGER = logging.getLogger(__name__)
+
+_ALLOWED_SEARCH_CRITERIA = {
+    "UNSEEN", "ALL", "SEEN", "FLAGGED", "UNFLAGGED", "ANSWERED", "UNANSWERED"
+}
 
 
 # Load environment variables from a local ``.env`` file if present.
@@ -88,6 +109,13 @@ def load_config() -> AppConfig:
     username = _get_env("IMAP_USERNAME", required=True)
     password = _get_env("IMAP_PASSWORD", required=True)
 
+    search_criteria = _get_env("IMAP_SEARCH", default="UNSEEN") or "UNSEEN"
+    if search_criteria.upper() not in _ALLOWED_SEARCH_CRITERIA:
+        raise MissingConfiguration(
+            f"Invalid value for {ENV_PREFIX}IMAP_SEARCH: '{search_criteria}'. "
+            f"Allowed values: {', '.join(sorted(_ALLOWED_SEARCH_CRITERIA))}"
+        )
+
     mail = MailConfig(
         host=cast(str, host),
         username=cast(str, username),
@@ -98,7 +126,7 @@ def load_config() -> AppConfig:
             _get_env("IMAP_USE_SSL", default="true") or "true"
         ).lower()
         != "false",
-        search_criteria=_get_env("IMAP_SEARCH", default="UNSEEN") or "UNSEEN",
+        search_criteria=search_criteria,
     )
 
     poll_interval = int(_get_env("POLL_INTERVAL", default="60") or "60")
@@ -110,7 +138,7 @@ def load_config() -> AppConfig:
     if monitor_url and monitor_api_key:
         alarm_monitor = TargetConfig(
             url=monitor_url.rstrip('/'),
-            api_key=monitor_api_key,
+            api_key=SecretString(monitor_api_key),
             enabled=True
         )
         LOGGER.info("Alarm Monitor target configured: %s", monitor_url)
@@ -124,7 +152,7 @@ def load_config() -> AppConfig:
     if messenger_url and messenger_api_key:
         alarm_messenger = TargetConfig(
             url=messenger_url.rstrip('/'),
-            api_key=messenger_api_key,
+            api_key=SecretString(messenger_api_key),
             enabled=True
         )
         LOGGER.info("Alarm Messenger target configured: %s", messenger_url)
@@ -147,6 +175,7 @@ def load_config() -> AppConfig:
 __all__ = [
     "AppConfig",
     "MailConfig",
+    "SecretString",
     "TargetConfig",
     "MissingConfiguration",
     "load_config",
