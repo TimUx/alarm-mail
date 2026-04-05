@@ -42,12 +42,10 @@ jobs:
         run: |
           flake8 alarm_mail --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 alarm_mail --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
-        continue-on-error: true
 
       - name: Type check with mypy
         run: |
           mypy alarm_mail --ignore-missing-imports
-        continue-on-error: true
 
       - name: Run pytest unit tests
         run: |

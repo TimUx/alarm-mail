@@ -95,7 +95,7 @@ class AlarmMailFetcher:
                 self.callback(raw_email)
                 try:
                     server.uid("STORE", uid, "+FLAGS", "(\\Seen)")
-                except Exception as mark_exc:
+                except imaplib.IMAP4.error as mark_exc:
                     LOGGER.warning(
                         "Failed to mark message UID %s as read: %s",
                         uid.decode() if isinstance(uid, bytes) else uid,
