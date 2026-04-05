@@ -23,18 +23,18 @@ _DEDUP_TTL_SECONDS = 300  # 5 minutes
 # Human-readable table of all ALARM_MAIL_* environment variables
 _ENV_VAR_TABLE = [
     # (suffix, required, secret)
-    ("IMAP_HOST",              True,  False),
-    ("IMAP_USERNAME",          True,  False),
-    ("IMAP_PASSWORD",          True,  True),
-    ("IMAP_MAILBOX",           False, False),
-    ("IMAP_PORT",              False, False),
-    ("IMAP_USE_SSL",           False, False),
-    ("IMAP_SEARCH",            False, False),
-    ("POLL_INTERVAL",          False, False),
-    ("ALARM_MONITOR_URL",      False, False),
-    ("ALARM_MONITOR_API_KEY",  False, True),
-    ("ALARM_MESSENGER_URL",    False, False),
-    ("ALARM_MESSENGER_API_KEY",False, True),
+    ("IMAP_HOST",               True,  False),
+    ("IMAP_USERNAME",           True,  False),
+    ("IMAP_PASSWORD",           True,  True),
+    ("IMAP_MAILBOX",            False, False),
+    ("IMAP_PORT",               False, False),
+    ("IMAP_USE_SSL",            False, False),
+    ("IMAP_SEARCH",             False, False),
+    ("POLL_INTERVAL",           False, False),
+    ("ALARM_MONITOR_URL",       False, False),
+    ("ALARM_MONITOR_API_KEY",   False, True),
+    ("ALARM_MESSENGER_URL",     False, False),
+    ("ALARM_MESSENGER_API_KEY", False, True),
 ]
 
 
@@ -103,8 +103,7 @@ class AlarmMailApp:
                     last_seen = self._dedup_cache[incident_number]
                     if now - last_seen < _DEDUP_TTL_SECONDS:
                         LOGGER.warning(
-                            "Duplicate incident %s processed within the last %d seconds, skipping push",
-                            incident_number,
+                            "Duplicate incident (same number seen within last %d seconds), skipping push",
                             _DEDUP_TTL_SECONDS,
                         )
                         return
