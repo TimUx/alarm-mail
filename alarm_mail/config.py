@@ -11,12 +11,12 @@ from __future__ import annotations
 import os
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 try:
     from dotenv import load_dotenv
 except ModuleNotFoundError:  # pragma: no cover - optional dependency fallback
-    def load_dotenv(*_args, **_kwargs):  # type: ignore[override]
+    def load_dotenv(*_args: Any, **_kwargs: Any) -> Any:  # type: ignore[misc]
         """Fallback shim if python-dotenv is not installed."""
 
         return False

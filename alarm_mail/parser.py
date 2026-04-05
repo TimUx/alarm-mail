@@ -73,16 +73,25 @@ def _parse_body(message: email.message.Message) -> str:
             content_type = part.get_content_type()
             if content_type == "text/plain":
                 charset = part.get_content_charset() or "utf-8"
-                return part.get_payload(decode=True).decode(charset, errors="replace")
+                raw = part.get_payload(decode=True)
+                if not isinstance(raw, bytes):
+                    return ""
+                return raw.decode(charset, errors="replace")
             if content_type == "text/html" and html_fallback is None:
                 charset = part.get_content_charset() or "utf-8"
-                raw_html = part.get_payload(decode=True).decode(charset, errors="replace")
+                raw_html_bytes = part.get_payload(decode=True)
+                if not isinstance(raw_html_bytes, bytes):
+                    continue
+                raw_html = raw_html_bytes.decode(charset, errors="replace")
                 html_fallback = _strip_html(raw_html)
         return html_fallback or ""
     else:
         content_type = message.get_content_type()
         charset = message.get_content_charset() or "utf-8"
-        text = message.get_payload(decode=True).decode(charset, errors="replace")
+        raw = message.get_payload(decode=True)
+        if not isinstance(raw, bytes):
+            return ""
+        text = raw.decode(charset, errors="replace")
         if content_type == "text/html":
             return _strip_html(text)
         return text
@@ -158,7 +167,7 @@ def _parse_incident_xml(body: str) -> Optional[Dict[str, Any]]:
     additional = get_text(IncidentTags.ORTSZUSATZ)
 
     location_parts = [street_line or object_name, additional, village, town]
-    location = ", ".join(part for part in location_parts if part)
+    location: Optional[str] = ", ".join(part for part in location_parts if part)
     if not location:
         location = town or village or street_line or object_name
 

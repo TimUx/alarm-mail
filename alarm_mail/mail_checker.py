@@ -63,6 +63,7 @@ class AlarmMailFetcher:
         as read are logged but do not abort processing of remaining messages."""
         config = self.config
         LOGGER.debug("Connecting to IMAP server %s", config.host)
+        server: imaplib.IMAP4
         if config.use_ssl:
             context = ssl.create_default_context()
             server = imaplib.IMAP4_SSL(config.host, config.port, ssl_context=context)
@@ -73,7 +74,7 @@ class AlarmMailFetcher:
             self._login_with_fallback(server, config.username, config.password)
             server.select(config.mailbox)
             LOGGER.debug("Searching for messages with criteria: %s", config.search_criteria)
-            typ, data = server.uid("SEARCH", None, config.search_criteria)
+            typ, data = server.uid("SEARCH", config.search_criteria)
             if typ != "OK":
                 LOGGER.warning("IMAP search failed with response: %s", typ)
                 return
