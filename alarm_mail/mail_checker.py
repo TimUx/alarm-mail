@@ -19,8 +19,6 @@ LOGGER = logging.getLogger(__name__)
 class MailState:
     """Track mail state across polling cycles."""
 
-    last_uid: Optional[int] = None
-
 
 class AlarmMailFetcher:
     """Poll the IMAP mailbox and invoke a callback when new messages arrive."""
@@ -81,12 +79,10 @@ class AlarmMailFetcher:
                 LOGGER.debug("No messages found matching criteria")
                 return
 
-            uids = [int(uid) for uid in data[0].split() if uid]
-            for uid in sorted(uids):
-                if self._state.last_uid is not None and uid <= self._state.last_uid:
-                    continue
-                LOGGER.info("Fetching new message UID %s", uid)
-                result, message_data = server.uid("FETCH", str(uid), "(RFC822)")
+            uids = [uid for uid in data[0].split() if uid]
+            for uid in uids:
+                LOGGER.info("Fetching message UID %s", uid.decode() if isinstance(uid, bytes) else uid)
+                result, message_data = server.uid("FETCH", uid, "(RFC822)")
                 if result != "OK":
                     LOGGER.warning("Failed to fetch message UID %s", uid)
                     continue
@@ -94,7 +90,7 @@ class AlarmMailFetcher:
                     continue
                 raw_email = message_data[0][1]
                 self.callback(raw_email)
-                self._state.last_uid = uid
+                server.uid("STORE", uid, "+FLAGS", "(\\Seen)")
         finally:
             try:
                 server.logout()
@@ -139,7 +135,7 @@ class AlarmMailFetcher:
                 return
             except imaplib.IMAP4.error as exc:
                 LOGGER.debug(
-                    "IMAP login failed when using %s encoding: %s", encoding, exc
+                    "IMAP login failed when using %s encoding: %s", encoding, type(exc).__name__
                 )
                 last_error = exc
 

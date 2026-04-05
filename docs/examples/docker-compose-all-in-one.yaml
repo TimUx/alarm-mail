@@ -7,8 +7,6 @@
 #   3. Passen Sie die Pfade in den build-Direktiven an
 #   4. Starten: docker compose -f docker-compose-all-in-one.yaml up -d
 
-version: '3.8'
-
 services:
   # =============================================================================
   # alarm-mail Service
