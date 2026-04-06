@@ -169,6 +169,46 @@ class TestPushToMessenger:
         assert body["emergencyDate"]
         assert "T" in body["emergencyDate"]
 
+    def test_keyword_primary_used_when_present(self, mocker):
+        """emergencyKeyword must use keyword_primary when it is set."""
+        mock_post = _mock_post(mocker)
+        svc = PushService(alarm_messenger=_messenger_target())
+        svc.push_alarm(_ALARM_DATA)
+        body = mock_post.call_args.kwargs["json"]
+        assert body["emergencyKeyword"] == "F3Y"
+
+    def test_keyword_fallback_when_primary_absent(self, mocker):
+        """When keyword_primary is absent, emergencyKeyword falls back to keyword."""
+        mock_post = _mock_post(mocker)
+        svc = PushService(alarm_messenger=_messenger_target())
+        alarm = {**_ALARM_DATA, "keyword_primary": None, "keyword": "F3Y – Brand"}
+        svc.push_alarm(alarm)
+        body = mock_post.call_args.kwargs["json"]
+        assert body["emergencyKeyword"] == "F3Y – Brand"
+
+    def test_keyword_unbekannt_when_both_absent(self, mocker):
+        """When both keyword_primary and keyword are absent, use 'Unbekannt'."""
+        mock_post = _mock_post(mocker)
+        svc = PushService(alarm_messenger=_messenger_target())
+        alarm = {**_ALARM_DATA, "keyword_primary": None, "keyword": None}
+        svc.push_alarm(alarm)
+        body = mock_post.call_args.kwargs["json"]
+        assert body["emergencyKeyword"] == "Unbekannt"
+
+    def test_no_groups_logs_debug(self, mocker, caplog):
+        """Omitting groups must emit a DEBUG log."""
+        import logging
+
+        _mock_post(mocker)
+        svc = PushService(alarm_messenger=_messenger_target())
+        alarm = {**_ALARM_DATA, "dispatch_group_codes": None}
+
+        with caplog.at_level(logging.DEBUG, logger="alarm_mail.push_service"):
+            svc.push_alarm(alarm)
+
+        debug_messages = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+        assert any("groups" in m and "omitted" in m for m in debug_messages)
+
     def test_http_error_does_not_raise(self, mocker):
         mock_response = mocker.MagicMock()
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("401")

@@ -6,7 +6,7 @@ import concurrent.futures
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -169,13 +169,17 @@ class PushService:
         emergency_date = (
             str(timestamp).strip()
             if timestamp is not None and str(timestamp).strip()
-            else datetime.utcnow().isoformat()
+            else datetime.now(timezone.utc).isoformat()
         )
 
         emergency_data: Dict[str, Any] = {
             "emergencyNumber": _str("incident_number"),
             "emergencyDate": emergency_date,
-            "emergencyKeyword": alarm_data.get("keyword_primary", ""),
+            "emergencyKeyword": (
+                alarm_data.get("keyword_primary")
+                or alarm_data.get("keyword")
+                or "Unbekannt"
+            ),
             "emergencyDescription": _str("diagnosis"),
             "emergencyLocation": _str("location"),
         }
@@ -183,6 +187,8 @@ class PushService:
         dispatch_codes = alarm_data.get("dispatch_group_codes")
         if dispatch_codes:
             emergency_data["groups"] = ",".join(dispatch_codes)
+        else:
+            LOGGER.debug("No dispatch_group_codes found, groups omitted from messenger payload")
 
         url = f"{self.alarm_messenger.url}/api/emergencies"
         headers = {
