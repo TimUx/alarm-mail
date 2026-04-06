@@ -294,3 +294,88 @@ class TestPostWithRetry:
 
         messenger_calls = [u for u in call_urls if "emergencies" in u]
         assert len(messenger_calls) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: _post_with_retry off-by-one fix (#1)
+# ---------------------------------------------------------------------------
+
+class TestPostWithRetryOffByOne:
+    def test_no_sleep_after_last_attempt(self, mocker):
+        """Sleep must NOT be called after the final failed attempt."""
+        mock_session = mocker.MagicMock()
+        mock_session.post.side_effect = requests.exceptions.ConnectionError("fail")
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+        sleep_mock = mocker.patch("alarm_mail.push_service.time.sleep")
+
+        svc = PushService(alarm_monitor=_monitor_target())
+        svc._post_with_retry(
+            "http://monitor:8000/api/alarm",
+            _ALARM_DATA,
+            {"X-API-Key": "k"},
+            "alarm-monitor",
+            backoff=[1, 2, 3],
+            max_retries=3,
+        )
+        # 3 attempts → 2 sleeps (between attempt 1→2 and 2→3, not after 3)
+        assert sleep_mock.call_count == 2
+
+    def test_exactly_max_retries_attempts(self, mocker):
+        """Exactly max_retries POST calls are made, no more."""
+        mock_session = mocker.MagicMock()
+        mock_session.post.side_effect = requests.exceptions.ConnectionError("fail")
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+        mocker.patch("alarm_mail.push_service.time.sleep")
+
+        svc = PushService(alarm_monitor=_monitor_target())
+        svc._post_with_retry(
+            "http://monitor:8000/api/alarm",
+            _ALARM_DATA,
+            {"X-API-Key": "k"},
+            "alarm-monitor",
+            backoff=[1, 2, 3],
+            max_retries=3,
+        )
+        assert mock_session.post.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Tests: PushMetrics (#5)
+# ---------------------------------------------------------------------------
+
+class TestPushMetrics:
+    def test_success_counter_incremented(self, mocker):
+        _mock_post(mocker)
+        svc = PushService(alarm_monitor=_monitor_target())
+        svc.push_alarm(_ALARM_DATA)
+        snap = svc.metrics.snapshot()
+        assert snap["push_success"].get("alarm-monitor", 0) == 1
+
+    def test_failure_counter_incremented_on_connection_error(self, mocker):
+        mock_session = mocker.MagicMock()
+        mock_session.post.side_effect = requests.exceptions.ConnectionError("fail")
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+        mocker.patch("alarm_mail.push_service.time.sleep")
+
+        svc = PushService(alarm_monitor=_monitor_target())
+        svc.push_alarm(_ALARM_DATA)
+        snap = svc.metrics.snapshot()
+        assert snap["push_failure"].get("alarm-monitor", 0) >= 1
+
+    def test_failure_counter_incremented_on_http_error(self, mocker):
+        mock_response = mocker.MagicMock()
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("500")
+        mock_session = mocker.MagicMock()
+        mock_session.post.return_value = mock_response
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+
+        svc = PushService(alarm_monitor=_monitor_target())
+        svc.push_alarm(_ALARM_DATA)
+        snap = svc.metrics.snapshot()
+        assert snap["push_failure"].get("alarm-monitor", 0) >= 1
+
+    def test_success_counter_zero_before_any_push(self):
+        svc = PushService(alarm_monitor=_monitor_target())
+        snap = svc.metrics.snapshot()
+        assert snap["push_success"] == {}
+        assert snap["push_failure"] == {}

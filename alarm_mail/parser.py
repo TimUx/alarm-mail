@@ -7,10 +7,13 @@ import email.policy
 from datetime import datetime
 from html.parser import HTMLParser
 import html
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
 import defusedxml.ElementTree as ET
+
+LOGGER = logging.getLogger(__name__)
 
 
 class IncidentTags:
@@ -97,6 +100,48 @@ def _parse_body(message: email.message.Message) -> str:
         return text
 
 
+def _find_incident_xml(message: email.message.Message) -> Optional[str]:
+    """Search the email for an ``<INCIDENT>`` XML payload.
+
+    Search order:
+    1. All ``text/plain`` parts.
+    2. All ``application/xml`` and ``text/xml`` MIME parts.
+    3. ``text/html`` parts (with tags stripped) as a last resort.
+
+    Returns the first body string that contains ``<INCIDENT``, or
+    ``None`` when none is found.
+    """
+
+    html_candidates: List[str] = []
+
+    if not message.is_multipart():
+        return _parse_body(message)
+
+    for part in message.walk():
+        content_type = part.get_content_type()
+        raw_bytes = part.get_payload(decode=True)
+        if not isinstance(raw_bytes, bytes):
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        decoded = raw_bytes.decode(charset, errors="replace")
+
+        if content_type == "text/plain":
+            if "<INCIDENT" in decoded:
+                return decoded
+        elif content_type in ("application/xml", "text/xml"):
+            if "<INCIDENT" in decoded:
+                return decoded
+        elif content_type == "text/html":
+            stripped = _strip_html(decoded)
+            if "<INCIDENT" in stripped:
+                html_candidates.append(stripped)
+
+    if html_candidates:
+        return html_candidates[0]
+    # No part contained <INCIDENT - return full body for normal parsing
+    return _parse_body(message)
+
+
 def _parse_timestamp(value: Optional[str]) -> Dict[str, Optional[str]]:
     """Return ISO and display representations for the provided timestamp string."""
 
@@ -142,6 +187,10 @@ def _parse_incident_xml(body: str) -> Optional[Dict[str, Any]]:
     try:
         root = ET.fromstring(xml_payload)
     except ET.ParseError:
+        LOGGER.warning(
+            "Failed to parse INCIDENT XML (first 200 chars): %s",
+            xml_payload[:200],
+        )
         return None
 
     if root.tag.upper() != "INCIDENT":
@@ -251,9 +300,9 @@ def parse_alarm(raw_email: bytes) -> Optional[Dict[str, Any]]:
     """
 
     message = email.message_from_bytes(raw_email, policy=email.policy.default)
-    body = _parse_body(message)
+    body = _find_incident_xml(message)
 
-    xml_alarm = _parse_incident_xml(body)
+    xml_alarm = _parse_incident_xml(body or "")
     if xml_alarm is None:
         return None
 

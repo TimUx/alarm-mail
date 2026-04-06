@@ -357,3 +357,118 @@ class TestPollState:
         assert fetcher._state.messages_processed == 0
         fetcher._poll_once()
         assert fetcher._state.messages_processed == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests: last_poll_timestamp wall-clock (#5)
+# ---------------------------------------------------------------------------
+
+class TestLastPollTimestamp:
+    def test_last_poll_timestamp_set_after_poll(self, mocker):
+        mock_server = MagicMock()
+        mock_server.login.return_value = ("OK", [b"Logged in"])
+        mock_server.select.return_value = ("OK", [b"0"])
+        mock_server.uid.return_value = ("OK", [b""])
+        mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4_SSL", return_value=mock_server)
+
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=MagicMock())
+        assert fetcher._state.last_poll_timestamp is None
+        fetcher._poll_once()
+        assert fetcher._state.last_poll_timestamp is not None
+        assert fetcher._state.last_poll_timestamp > 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: exponential backoff on IMAP errors (#7)
+# ---------------------------------------------------------------------------
+
+class TestExponentialBackoff:
+    def test_backoff_doubles_on_consecutive_errors(self, mocker):
+        """Each consecutive error must double the wait time up to poll_interval * 8."""
+        fetcher = _make_fetcher()
+        fetcher.poll_interval = 10
+        stop_after = {"count": 0}
+
+        poll_calls = []
+
+        def failing_poll():
+            poll_calls.append(1)
+            raise Exception("simulated IMAP failure")
+
+        mocker.patch.object(fetcher, "_poll_once", side_effect=failing_poll)
+        wait_times = []
+
+        def recording_wait(timeout=None):
+            wait_times.append(timeout)
+            stop_after["count"] += 1
+            # Stop after 4 error cycles
+            if stop_after["count"] >= 4:
+                fetcher._stop_event.set()
+            return fetcher._stop_event.is_set()
+
+        fetcher._stop_event.wait = recording_wait
+
+        fetcher._run()
+
+        assert len(wait_times) >= 3
+        # Waits should be non-decreasing (exponential backoff)
+        for i in range(1, min(4, len(wait_times))):
+            assert wait_times[i] >= wait_times[i - 1]
+
+    def test_backoff_capped_at_eight_times_poll_interval(self, mocker):
+        """Backoff must never exceed poll_interval * 8."""
+        fetcher = _make_fetcher()
+        fetcher.poll_interval = 10
+        max_expected = 10 * 8
+
+        stop_after = {"count": 0}
+        wait_times = []
+
+        def failing_poll():
+            raise Exception("fail")
+
+        mocker.patch.object(fetcher, "_poll_once", side_effect=failing_poll)
+
+        def recording_wait(timeout=None):
+            wait_times.append(timeout)
+            stop_after["count"] += 1
+            if stop_after["count"] >= 6:
+                fetcher._stop_event.set()
+            return fetcher._stop_event.is_set()
+
+        fetcher._stop_event.wait = recording_wait
+        fetcher._run()
+
+        for wt in wait_times:
+            assert wt <= max_expected, f"Wait time {wt} exceeds cap {max_expected}"
+
+    def test_backoff_resets_on_success(self, mocker):
+        """After a successful poll, wait time must reset to poll_interval."""
+        fetcher = _make_fetcher()
+        fetcher.poll_interval = 10
+
+        stop_after = {"count": 0}
+        poll_sequence = [Exception("fail"), None, Exception("fail")]
+        wait_times = []
+
+        def sequence_poll():
+            if poll_sequence:
+                result = poll_sequence.pop(0)
+                if result is not None:
+                    raise result
+
+        mocker.patch.object(fetcher, "_poll_once", side_effect=sequence_poll)
+
+        def recording_wait(timeout=None):
+            wait_times.append(timeout)
+            stop_after["count"] += 1
+            if stop_after["count"] >= 3:
+                fetcher._stop_event.set()
+            return fetcher._stop_event.is_set()
+
+        fetcher._stop_event.wait = recording_wait
+        fetcher._run()
+
+        # After error (index 0) → backoff; after success (index 1) → reset to poll_interval
+        assert len(wait_times) >= 2
+        assert wait_times[1] == fetcher.poll_interval

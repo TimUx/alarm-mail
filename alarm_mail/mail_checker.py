@@ -20,6 +20,7 @@ class MailState:
     """Track mail state across polling cycles."""
 
     last_poll_time: Optional[float] = None
+    last_poll_timestamp: Optional[float] = None
     messages_processed: int = 0
 
 
@@ -57,12 +58,24 @@ class AlarmMailFetcher:
         return self._thread is not None and self._thread.is_alive()
 
     def _run(self) -> None:
+        consecutive_errors = 0
         while not self._stop_event.is_set():
             try:
                 self._poll_once()
+                consecutive_errors = 0
+                wait = self.poll_interval
             except Exception as exc:  # pragma: no cover - safety net
                 LOGGER.exception("Error while polling mailbox: %s", exc)
-            time.sleep(self.poll_interval)
+                consecutive_errors += 1
+                cap = self.poll_interval * 8
+                wait = min(
+                    self.poll_interval * (2 ** (consecutive_errors - 1)),
+                    cap,
+                )
+            LOGGER.debug("Next poll in %d seconds", wait)
+            # wait() returns early when stop_event is set;
+            # the while-condition then exits the loop.
+            self._stop_event.wait(timeout=wait)
 
     # pylint: disable=too-many-locals
     def _poll_once(self) -> None:
@@ -113,6 +126,7 @@ class AlarmMailFetcher:
                     )
         finally:
             self._state.last_poll_time = time.monotonic()
+            self._state.last_poll_timestamp = time.time()
             try:
                 server.logout()
             except imaplib.IMAP4.error:

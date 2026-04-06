@@ -145,3 +145,81 @@ class TestLoadConfigOptionalVars:
             monkeypatch.setenv("ALARM_MAIL_IMAP_SEARCH", criteria)
             config = load_config()
             assert config.mail.search_criteria == criteria
+
+
+# ---------------------------------------------------------------------------
+# Tests: _get_int_env validation (#3)
+# ---------------------------------------------------------------------------
+
+class TestGetIntEnvValidation:
+    def _set_required(self, monkeypatch):
+        monkeypatch.setenv("ALARM_MAIL_IMAP_HOST", "imap.example.com")
+        monkeypatch.setenv("ALARM_MAIL_IMAP_USERNAME", "user@example.com")
+        monkeypatch.setenv("ALARM_MAIL_IMAP_PASSWORD", "secret")
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MONITOR_URL", raising=False)
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MONITOR_API_KEY", raising=False)
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MESSENGER_URL", raising=False)
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MESSENGER_API_KEY", raising=False)
+
+    def test_invalid_poll_interval_raises(self, monkeypatch):
+        self._set_required(monkeypatch)
+        monkeypatch.setenv("ALARM_MAIL_POLL_INTERVAL", "abc")
+        with pytest.raises(MissingConfiguration, match="POLL_INTERVAL"):
+            load_config()
+
+    def test_invalid_http_timeout_raises(self, monkeypatch):
+        self._set_required(monkeypatch)
+        monkeypatch.setenv("ALARM_MAIL_HTTP_TIMEOUT", "not-a-number")
+        with pytest.raises(MissingConfiguration, match="HTTP_TIMEOUT"):
+            load_config()
+
+    def test_invalid_imap_port_raises(self, monkeypatch):
+        self._set_required(monkeypatch)
+        monkeypatch.setenv("ALARM_MAIL_IMAP_PORT", "xyz")
+        with pytest.raises(MissingConfiguration, match="IMAP_PORT"):
+            load_config()
+
+    def test_invalid_dedup_ttl_raises(self, monkeypatch):
+        self._set_required(monkeypatch)
+        monkeypatch.setenv("ALARM_MAIL_DEDUP_TTL", "bad")
+        with pytest.raises(MissingConfiguration, match="DEDUP_TTL"):
+            load_config()
+
+    def test_error_message_includes_invalid_value(self, monkeypatch):
+        self._set_required(monkeypatch)
+        monkeypatch.setenv("ALARM_MAIL_POLL_INTERVAL", "foobar")
+        with pytest.raises(MissingConfiguration, match="foobar"):
+            load_config()
+
+    def test_valid_poll_interval_accepted(self, monkeypatch):
+        self._set_required(monkeypatch)
+        monkeypatch.setenv("ALARM_MAIL_POLL_INTERVAL", "120")
+        config = load_config()
+        assert config.poll_interval == 120
+
+
+# ---------------------------------------------------------------------------
+# Tests: configurable dedup_ttl in AppConfig (#4)
+# ---------------------------------------------------------------------------
+
+class TestConfigDedupTTL:
+    def _set_required(self, monkeypatch):
+        monkeypatch.setenv("ALARM_MAIL_IMAP_HOST", "imap.example.com")
+        monkeypatch.setenv("ALARM_MAIL_IMAP_USERNAME", "user@example.com")
+        monkeypatch.setenv("ALARM_MAIL_IMAP_PASSWORD", "secret")
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MONITOR_URL", raising=False)
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MONITOR_API_KEY", raising=False)
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MESSENGER_URL", raising=False)
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MESSENGER_API_KEY", raising=False)
+        monkeypatch.delenv("ALARM_MAIL_DEDUP_TTL", raising=False)
+
+    def test_default_dedup_ttl(self, monkeypatch):
+        self._set_required(monkeypatch)
+        config = load_config()
+        assert config.dedup_ttl == 300
+
+    def test_custom_dedup_ttl(self, monkeypatch):
+        self._set_required(monkeypatch)
+        monkeypatch.setenv("ALARM_MAIL_DEDUP_TTL", "600")
+        config = load_config()
+        assert config.dedup_ttl == 600
