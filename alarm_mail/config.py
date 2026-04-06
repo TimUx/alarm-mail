@@ -45,7 +45,7 @@ class MailConfig:
 
     host: str
     username: str
-    password: str
+    password: str = field(repr=False)
     mailbox: str = "INBOX"
     port: int = 993
     use_ssl: bool = True

@@ -227,3 +227,133 @@ class TestStartStopIsRunning:
         ready.wait(timeout=2)
         fetcher.stop()
         assert fetcher.is_running is False
+
+
+# ---------------------------------------------------------------------------
+# Non-SSL / plain IMAP path
+# ---------------------------------------------------------------------------
+
+class TestNonSSLPath:
+    def test_plain_imap_used_when_ssl_disabled(self, mocker):
+        """AlarmMailFetcher must use IMAP4 (not IMAP4_SSL) when use_ssl=False."""
+        raw_email = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
+
+        mock_server = MagicMock()
+        mock_server.login.return_value = ("OK", [b"Logged in"])
+        mock_server.select.return_value = ("OK", [b"1"])
+        mock_server.uid.side_effect = lambda cmd, *a: (
+            ("OK", [b"99"]) if cmd == "SEARCH" else
+            ("OK", [(b"99 (RFC822 {4})", raw_email), b")"]) if cmd == "FETCH" else
+            ("OK", [None])
+        )
+
+        mock_imap4 = mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4", return_value=mock_server)
+        mock_ssl = mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4_SSL")
+
+        callback = MagicMock()
+        fetcher = AlarmMailFetcher(
+            config=_make_config(use_ssl=False, port=143),
+            callback=callback,
+        )
+        fetcher._poll_once()
+
+        mock_imap4.assert_called_once()
+        mock_ssl.assert_not_called()
+        callback.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Empty search results
+# ---------------------------------------------------------------------------
+
+class TestEmptySearchResults:
+    def test_no_callback_when_no_messages(self, mocker):
+        mock_server = MagicMock()
+        mock_server.login.return_value = ("OK", [b"Logged in"])
+        mock_server.select.return_value = ("OK", [b"0"])
+        mock_server.uid.return_value = ("OK", [b""])
+
+        mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4_SSL", return_value=mock_server)
+
+        callback = MagicMock()
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=callback)
+        fetcher._poll_once()
+
+        callback.assert_not_called()
+
+    def test_no_callback_when_search_data_is_none(self, mocker):
+        mock_server = MagicMock()
+        mock_server.login.return_value = ("OK", [b"Logged in"])
+        mock_server.select.return_value = ("OK", [b"0"])
+        mock_server.uid.return_value = ("OK", [None])
+
+        mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4_SSL", return_value=mock_server)
+
+        callback = MagicMock()
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=callback)
+        fetcher._poll_once()
+
+        callback.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# IMAP SEARCH failure
+# ---------------------------------------------------------------------------
+
+class TestSearchFailure:
+    def test_warning_logged_when_search_returns_non_ok(self, mocker, caplog):
+        import logging
+
+        mock_server = MagicMock()
+        mock_server.login.return_value = ("OK", [b"Logged in"])
+        mock_server.select.return_value = ("OK", [b"1"])
+        mock_server.uid.return_value = ("NO", [b"Search failed"])
+
+        mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4_SSL", return_value=mock_server)
+
+        callback = MagicMock()
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=callback)
+
+        with caplog.at_level(logging.WARNING, logger="alarm_mail.mail_checker"):
+            fetcher._poll_once()
+
+        callback.assert_not_called()
+        assert any("search" in r.message.lower() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Poll state update
+# ---------------------------------------------------------------------------
+
+class TestPollState:
+    def test_last_poll_time_set_after_successful_poll(self, mocker):
+        mock_server = MagicMock()
+        mock_server.login.return_value = ("OK", [b"Logged in"])
+        mock_server.select.return_value = ("OK", [b"0"])
+        mock_server.uid.return_value = ("OK", [b""])
+
+        mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4_SSL", return_value=mock_server)
+
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=MagicMock())
+        assert fetcher._state.last_poll_time is None
+        fetcher._poll_once()
+        assert fetcher._state.last_poll_time is not None
+
+    def test_messages_processed_counter_incremented(self, mocker):
+        raw_email = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
+
+        mock_server = MagicMock()
+        mock_server.login.return_value = ("OK", [b"Logged in"])
+        mock_server.select.return_value = ("OK", [b"2"])
+        mock_server.uid.side_effect = lambda cmd, *a: (
+            ("OK", [b"1 2"]) if cmd == "SEARCH" else
+            ("OK", [(b"(RFC822 {4})", raw_email), b")"]) if cmd == "FETCH" else
+            ("OK", [None])
+        )
+
+        mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4_SSL", return_value=mock_server)
+
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=MagicMock())
+        assert fetcher._state.messages_processed == 0
+        fetcher._poll_once()
+        assert fetcher._state.messages_processed == 2

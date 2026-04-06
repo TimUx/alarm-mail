@@ -94,7 +94,7 @@ class AlarmMailApp:
             )
             conn.commit()
             # Load non-expired entries into the in-memory cache
-            cutoff = time.monotonic() - _DEDUP_TTL_SECONDS
+            cutoff = time.time() - _DEDUP_TTL_SECONDS
             conn.execute(
                 "DELETE FROM processed_incidents WHERE seen_at < ?", (cutoff,)
             )
@@ -144,7 +144,7 @@ class AlarmMailApp:
 
             incident_number = alarm_data.get("incident_number")
             if incident_number:
-                now = time.monotonic()
+                now = time.time()
                 with self._dedup_lock:
                     if incident_number in self._dedup_cache:
                         last_seen = self._dedup_cache[incident_number]
