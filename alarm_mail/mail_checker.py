@@ -7,7 +7,7 @@ import logging
 import ssl
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from .config import MailConfig
@@ -18,6 +18,9 @@ LOGGER = logging.getLogger(__name__)
 @dataclass
 class MailState:
     """Track mail state across polling cycles."""
+
+    last_poll_time: Optional[float] = None
+    messages_processed: int = 0
 
 
 class AlarmMailFetcher:
@@ -47,6 +50,11 @@ class AlarmMailFetcher:
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=5)
+
+    @property
+    def is_running(self) -> bool:
+        """Return True when the polling thread is alive."""
+        return self._thread is not None and self._thread.is_alive()
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -94,6 +102,7 @@ class AlarmMailFetcher:
                     continue
                 raw_email = message_data[0][1]
                 self.callback(raw_email)
+                self._state.messages_processed += 1
                 try:
                     server.uid("STORE", uid, "+FLAGS", "(\\Seen)")
                 except imaplib.IMAP4.error as mark_exc:
@@ -103,6 +112,7 @@ class AlarmMailFetcher:
                         mark_exc,
                     )
         finally:
+            self._state.last_poll_time = time.monotonic()
             try:
                 server.logout()
             except imaplib.IMAP4.error:

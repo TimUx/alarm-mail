@@ -28,10 +28,13 @@ def _messenger_target(url: str = "http://messenger:3000", key: str = "messengerk
 
 
 def _mock_post(mocker):
-    """Return a mock for requests.post with a benign default response."""
+    """Return a mock for session.post with a benign default response."""
     mock_response = mocker.MagicMock()
     mock_response.raise_for_status.return_value = None
-    return mocker.patch("requests.post", return_value=mock_response)
+    mock_session = mocker.MagicMock()
+    mock_session.post.return_value = mock_response
+    mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+    return mock_session.post
 
 
 class TestPushToMonitor:
@@ -65,16 +68,18 @@ class TestPushToMonitor:
     def test_http_error_does_not_raise(self, mocker):
         mock_response = mocker.MagicMock()
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("500")
-        mocker.patch("requests.post", return_value=mock_response)
+        mock_session = mocker.MagicMock()
+        mock_session.post.return_value = mock_response
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
         svc = PushService(alarm_monitor=_monitor_target())
         # Should not raise even on server error
         svc.push_alarm(_ALARM_DATA)
 
     def test_connection_error_does_not_raise(self, mocker):
-        mocker.patch(
-            "requests.post",
-            side_effect=requests.exceptions.ConnectionError("connection refused"),
-        )
+        mock_session = mocker.MagicMock()
+        mock_session.post.side_effect = requests.exceptions.ConnectionError("connection refused")
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+        mocker.patch("alarm_mail.push_service.time.sleep")
         svc = PushService(alarm_monitor=_monitor_target())
         svc.push_alarm(_ALARM_DATA)
 
@@ -125,7 +130,9 @@ class TestPushToMessenger:
     def test_http_error_does_not_raise(self, mocker):
         mock_response = mocker.MagicMock()
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("401")
-        mocker.patch("requests.post", return_value=mock_response)
+        mock_session = mocker.MagicMock()
+        mock_session.post.return_value = mock_response
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
         svc = PushService(alarm_messenger=_messenger_target())
         svc.push_alarm(_ALARM_DATA)
 

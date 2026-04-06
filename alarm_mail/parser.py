@@ -187,7 +187,8 @@ def _parse_incident_xml(body: str) -> Optional[Dict[str, Any]]:
                 text = _extract_text(child)
                 if text:
                     dispatch_groups.append(text)
-                    for code in re.findall(r"\b([A-ZÄÖÜ]{1,}[0-9]{1,})\b", text):
+                    truncated = text[:500] if len(text) > 500 else text
+                    for code in re.findall(r"\b([A-ZÄÖÜ]{1,6}[0-9]{1,6})\b", truncated):
                         dispatch_codes.append(code.upper())
 
     if dispatch_codes:

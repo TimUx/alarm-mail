@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import collections
 import logging
+import os
+import sqlite3
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -35,6 +38,10 @@ _ENV_VAR_TABLE = [
     ("ALARM_MONITOR_API_KEY",   False, True),
     ("ALARM_MESSENGER_URL",     False, False),
     ("ALARM_MESSENGER_API_KEY", False, True),
+    ("HTTP_TIMEOUT",                  False, False),
+    ("LOG_LEVEL",                     False, False),
+    ("ALARM_MONITOR_VERIFY_SSL",      False, False),
+    ("ALARM_MESSENGER_VERIFY_SSL",    False, False),
 ]
 
 
@@ -67,9 +74,47 @@ class AlarmMailApp:
         self.push_service = PushService(
             alarm_monitor=config.alarm_monitor,
             alarm_messenger=config.alarm_messenger,
+            http_timeout=config.http_timeout,
         )
         self.mail_fetcher: Optional[AlarmMailFetcher] = None
         self._dedup_cache: collections.OrderedDict = collections.OrderedDict()
+        self._dedup_lock = threading.Lock()
+
+        # Optional persistent dedup store
+        self._dedup_db_path: Optional[str] = os.environ.get("ALARM_MAIL_DEDUP_DB")
+        if self._dedup_db_path:
+            self._init_dedup_db()
+
+    def _init_dedup_db(self) -> None:
+        """Initialise the SQLite dedup database and pre-load recent entries."""
+        with sqlite3.connect(self._dedup_db_path) as conn:  # type: ignore[arg-type]
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS processed_incidents "
+                "(incident_number TEXT PRIMARY KEY, seen_at REAL)"
+            )
+            conn.commit()
+            # Load non-expired entries into the in-memory cache
+            cutoff = time.monotonic() - _DEDUP_TTL_SECONDS
+            conn.execute(
+                "DELETE FROM processed_incidents WHERE seen_at < ?", (cutoff,)
+            )
+            conn.commit()
+            for row in conn.execute("SELECT incident_number, seen_at FROM processed_incidents"):
+                self._dedup_cache[row[0]] = row[1]
+
+    def _dedup_db_insert(self, incident_number: str, seen_at: float) -> None:
+        """Persist a new incident number to the SQLite dedup store."""
+        if not self._dedup_db_path:
+            return
+        try:
+            with sqlite3.connect(self._dedup_db_path) as conn:  # type: ignore[arg-type]
+                conn.execute(
+                    "INSERT OR IGNORE INTO processed_incidents (incident_number, seen_at) VALUES (?, ?)",
+                    (incident_number, seen_at),
+                )
+                conn.commit()
+        except sqlite3.Error as exc:
+            LOGGER.warning("Failed to persist dedup entry to SQLite: %s", exc)
 
     def start(self) -> None:
         """Start the mail polling background thread."""
@@ -83,10 +128,11 @@ class AlarmMailApp:
             LOGGER.info("Started mail polling thread")
 
     def stop(self) -> None:
-        """Stop the mail polling background thread."""
+        """Stop the mail polling background thread and clean up resources."""
         if self.mail_fetcher is not None:
             self.mail_fetcher.stop()
             LOGGER.info("Stopped mail polling thread")
+        self.push_service.close()
 
     def _handle_email(self, raw_email: bytes) -> None:
         """Process a new email: parse and push to targets."""
@@ -99,18 +145,20 @@ class AlarmMailApp:
             incident_number = alarm_data.get("incident_number")
             if incident_number:
                 now = time.monotonic()
-                if incident_number in self._dedup_cache:
-                    last_seen = self._dedup_cache[incident_number]
-                    if now - last_seen < _DEDUP_TTL_SECONDS:
-                        LOGGER.warning(
-                            "Duplicate incident (same number seen within last %d seconds), skipping push",
-                            _DEDUP_TTL_SECONDS,
-                        )
-                        return
-                self._dedup_cache[incident_number] = now
-                # Trim cache to max size (oldest first)
-                while len(self._dedup_cache) > _DEDUP_MAX_SIZE:
-                    self._dedup_cache.popitem(last=False)
+                with self._dedup_lock:
+                    if incident_number in self._dedup_cache:
+                        last_seen = self._dedup_cache[incident_number]
+                        if now - last_seen < _DEDUP_TTL_SECONDS:
+                            LOGGER.warning(
+                                "Duplicate incident (same number seen within last %d seconds), skipping push",
+                                _DEDUP_TTL_SECONDS,
+                            )
+                            return
+                    self._dedup_cache[incident_number] = now
+                    # Trim cache to max size (oldest first)
+                    while len(self._dedup_cache) > _DEDUP_MAX_SIZE:
+                        self._dedup_cache.popitem(last=False)
+                self._dedup_db_insert(incident_number, now)
 
             LOGGER.info(
                 "Parsed alarm: %s - %s",
@@ -127,8 +175,10 @@ class AlarmMailApp:
 def create_app() -> Flask:
     """Create and configure the Flask application."""
 
+    level_str = os.environ.get("ALARM_MAIL_LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, level_str, logging.INFO)
     logging.basicConfig(
-        level=logging.INFO,
+        level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
@@ -150,13 +200,9 @@ def create_app() -> Flask:
     def health():
         """Health check endpoint."""
         fetcher: Optional[AlarmMailFetcher] = alarm_app.mail_fetcher
-        if (
-            fetcher is not None
-            and fetcher._thread is not None
-            and fetcher._thread.is_alive()
-        ):
-            return jsonify({"status": "ok", "polling": "running"})
-        return jsonify({"status": "degraded", "polling": "stopped"}), 503
+        if fetcher is not None and fetcher.is_running:
+            return jsonify({"status": "ok", "polling": "running", "service": "alarm-mail"})
+        return jsonify({"status": "degraded", "polling": "stopped", "service": "alarm-mail"}), 503
 
     @app.route("/")
     def index():
