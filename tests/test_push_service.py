@@ -184,14 +184,16 @@ class TestPostWithRetry:
         mocker.patch("alarm_mail.push_service.time.sleep")
 
         svc = PushService(alarm_monitor=_monitor_target())
-        # default backoff=[1, 5, 15] → 3 attempts total
+        explicit_backoff = [1, 2, 3]
         svc._post_with_retry(
             "http://monitor:8000/api/alarm",
             _ALARM_DATA,
             {"X-API-Key": "k"},
             "alarm-monitor",
+            backoff=explicit_backoff,
+            max_retries=len(explicit_backoff),
         )
-        assert mock_session.post.call_count == 3
+        assert mock_session.post.call_count == len(explicit_backoff)
 
     def test_timeout_error_retried(self, mocker):
         """Timeout errors should trigger the same retry logic as connection errors."""

@@ -104,7 +104,7 @@ class PushService:
         if last_transient_exc is not None:
             LOGGER.error(
                 "Push to %s failed after %d attempts: %s",
-                target_name, len(backoff), last_transient_exc,
+                target_name, max_retries, last_transient_exc,
             )
 
     def _push_to_monitor(self, alarm_data: Dict[str, Any]) -> None:
