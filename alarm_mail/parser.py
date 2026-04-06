@@ -138,7 +138,7 @@ def _find_incident_xml(message: email.message.Message) -> Optional[str]:
 
     if html_candidates:
         return html_candidates[0]
-    # No part contained <INCIDENT – return full body for normal parsing
+    # No part contained <INCIDENT - return full body for normal parsing
     return _parse_body(message)
 
 

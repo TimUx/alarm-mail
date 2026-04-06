@@ -73,6 +73,8 @@ class AlarmMailFetcher:
                     cap,
                 )
             LOGGER.debug("Next poll in %d seconds", wait)
+            # wait() returns early when stop_event is set;
+            # the while-condition then exits the loop.
             self._stop_event.wait(timeout=wait)
 
     # pylint: disable=too-many-locals
