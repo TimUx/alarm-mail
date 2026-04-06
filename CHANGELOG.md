@@ -103,12 +103,8 @@ MAJOR.MINOR.PATCH
 Mögliche zukünftige Erweiterungen (keine Garantie):
 
 ### v1.1.0 (geplant)
-- [ ] Prometheus-Metriken-Export
-- [ ] Erweiterte Logging-Optionen
-- [ ] Retry-Mechanismus für fehlgeschlagene Pushes
 - [ ] Webhook-Support als zusätzliches Target
-- [ ] Health-Check mit detailliertem Status
-- [ ] Konfiguration von Timeout-Werten
+- [ ] Erweiterte Logging-Optionen
 - [ ] Support für mehrere IMAP-Postfächer
 
 ### v1.2.0 (geplant)

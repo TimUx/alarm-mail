@@ -1919,7 +1919,7 @@ Wir freuen uns über jede Form von Beitrag:
 3. Änderungen committen
 4. Pull Request öffnen
 
-Siehe auch: [CONTRIBUTING.md](CONTRIBUTING.md) (falls vorhanden)
+Siehe auch: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ---
 

@@ -5,14 +5,16 @@ Diese Dokumentation beschreibt die REST-API-Endpunkte des alarm-mail Service sow
 ## Inhaltsverzeichnis
 
 - [alarm-mail Service API](#alarm-mail-service-api)
+  - [GET /health](#get-health)
+  - [GET /](#get-)
+  - [GET /metrics](#get-metrics)
 - [Integration mit alarm-monitor](#integration-mit-alarm-monitor)
 - [Integration mit alarm-messenger](#integration-mit-alarm-messenger)
-
 ---
 
 ## alarm-mail Service API
 
-Der alarm-mail Service stellt zwei öffentliche HTTP-Endpunkte bereit.
+Der alarm-mail Service stellt drei öffentliche HTTP-Endpunkte bereit.
 
 ### Basis-URL
 
@@ -171,6 +173,65 @@ curl http://localhost:8000/
   "targets": ["alarm-monitor", "alarm-messenger"],
   "poll_interval": 30
 }
+```
+
+---
+
+### GET /metrics
+
+**Prometheus-kompatibler Metriken-Endpunkt** im Plain-Text-Format.
+
+#### Request
+
+```http
+GET /metrics HTTP/1.1
+Host: localhost:8000
+```
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+#### Response
+
+**Status:** `200 OK` (`text/plain; version=0.0.4`)
+
+```
+# HELP alarm_mail_messages_processed_total Total number of emails processed
+# TYPE alarm_mail_messages_processed_total counter
+alarm_mail_messages_processed_total 42
+
+# HELP alarm_mail_push_success_total Successful pushes per target
+# TYPE alarm_mail_push_success_total counter
+alarm_mail_push_success_total{target="alarm-monitor"} 40
+alarm_mail_push_success_total{target="alarm-messenger"} 41
+
+# HELP alarm_mail_push_failure_total Failed pushes per target
+# TYPE alarm_mail_push_failure_total counter
+alarm_mail_push_failure_total{target="alarm-monitor"} 2
+alarm_mail_push_failure_total{target="alarm-messenger"} 1
+
+# HELP alarm_mail_last_poll_timestamp_seconds Unix timestamp of last successful poll
+# TYPE alarm_mail_last_poll_timestamp_seconds gauge
+alarm_mail_last_poll_timestamp_seconds 1749123456.789
+```
+
+#### Metriken-Referenz
+
+| Metrik | Typ | Beschreibung |
+|--------|-----|--------------|
+| `alarm_mail_messages_processed_total` | Counter | Gesamtanzahl der verarbeiteten E-Mails seit Start |
+| `alarm_mail_push_success_total` | Counter | Erfolgreiche API-Pushes, aufgeschlüsselt nach Target |
+| `alarm_mail_push_failure_total` | Counter | Fehlgeschlagene API-Pushes, aufgeschlüsselt nach Target |
+| `alarm_mail_last_poll_timestamp_seconds` | Gauge | Unix-Timestamp des letzten erfolgreichen IMAP-Polls |
+
+#### Prometheus-Integration
+
+```yaml
+- job_name: 'alarm-mail'
+  static_configs:
+    - targets: ['alarm-mail:8000']
+  metrics_path: /metrics
 ```
 
 ---
@@ -445,15 +506,10 @@ Bei Fehlern beim Push zu Targets:
 
 Standard-Timeout: **10 Sekunden**
 
-Kann im Code angepasst werden (`push_service.py`):
+Konfigurierbar über die Umgebungsvariable `ALARM_MAIL_HTTP_TIMEOUT`:
 
-```python
-response = requests.post(
-    url,
-    json=data,
-    headers=headers,
-    timeout=10,  # Sekunden
-)
+```bash
+ALARM_MAIL_HTTP_TIMEOUT=15  # Sekunden
 ```
 
 ---
