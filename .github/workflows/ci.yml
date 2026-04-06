@@ -16,10 +16,10 @@ jobs:
       contents: read
     
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'
@@ -36,16 +36,14 @@ jobs:
         flake8 alarm_mail --count --select=E9,F63,F7,F82 --show-source --statistics
         # Exit-zero treats all errors as warnings
         flake8 alarm_mail --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
-      continue-on-error: true
     
     - name: Type check with mypy
       run: |
         mypy alarm_mail --ignore-missing-imports
-      continue-on-error: true
 
     - name: Run pytest unit tests
       run: |
-        pytest tests/ -v
+        pytest tests/ -v --cov=alarm_mail --cov-report=term-missing --cov-fail-under=75
     
     - name: Test application startup
       run: |
@@ -66,13 +64,13 @@ jobs:
       contents: read
     
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v4
     
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v3
     
     - name: Build Docker image
-      uses: docker/build-push-action@v7
+      uses: docker/build-push-action@v5
       with:
         context: .
         push: false

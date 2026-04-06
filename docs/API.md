@@ -49,6 +49,17 @@ curl http://localhost:8000/health
 ```json
 {
   "status": "ok",
+  "polling": "running",
+  "service": "alarm-mail"
+}
+```
+
+**Status:** `503 Service Unavailable` (when polling thread is not running)
+
+```json
+{
+  "status": "degraded",
+  "polling": "stopped",
   "service": "alarm-mail"
 }
 ```
@@ -57,7 +68,8 @@ curl http://localhost:8000/health
 
 | Feld | Typ | Wert | Beschreibung |
 |------|-----|------|--------------|
-| `status` | String | `"ok"` | Gesundheitsstatus (immer "ok" wenn erreichbar) |
+| `status` | String | `"ok"` / `"degraded"` | Gesundheitsstatus |
+| `polling` | String | `"running"` / `"stopped"` | Status des IMAP-Polling-Threads |
 | `service` | String | `"alarm-mail"` | Name des Service |
 
 #### Verwendung
