@@ -144,6 +144,10 @@ class PushService:
             "X-API-Key": self.alarm_monitor.api_key.get_secret_value(),
         }
 
+        if not self.alarm_monitor.verify_ssl:
+            LOGGER.warning(
+                "SSL verification DISABLED for alarm-monitor — not recommended in production"
+            )
         LOGGER.info("Pushing alarm to alarm-monitor: %s", url)
         self._post_with_retry(
             url, alarm_data, headers, "alarm-monitor",
@@ -174,6 +178,10 @@ class PushService:
             "X-API-Key": self.alarm_messenger.api_key.get_secret_value(),
         }
 
+        if not self.alarm_messenger.verify_ssl:
+            LOGGER.warning(
+                "SSL verification DISABLED for alarm-messenger — not recommended in production"
+            )
         LOGGER.info("Pushing alarm to alarm-messenger: %s", url)
         self._post_with_retry(
             url, emergency_data, headers, "alarm-messenger",

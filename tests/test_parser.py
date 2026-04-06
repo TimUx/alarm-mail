@@ -497,6 +497,45 @@ class TestRemarkFields:
 
 
 # ---------------------------------------------------------------------------
+# Tests: XXE (External Entity Injection) safety
+# ---------------------------------------------------------------------------
+
+class TestXXESafety:
+    """Verify that defusedxml blocks XXE payloads."""
+
+    def test_xxe_entity_not_expanded(self):
+        """An XML payload with a SYSTEM entity must not resolve to file contents."""
+        xxe_xml = (
+            '<!DOCTYPE INCIDENT ['
+            '<!ENTITY secret SYSTEM "file:///etc/passwd">'
+            ']>'
+            '<INCIDENT><ENR>&secret;</ENR></INCIDENT>'
+        )
+        raw = _make_email(xxe_xml)
+        # defusedxml must either reject the payload (None) or return the literal
+        # entity reference string — it must never resolve the entity.
+        result = parse_alarm(raw)
+        if result is not None:
+            incident_number = result.get("incident_number")
+            # The entity must not have been expanded; the value must be the
+            # literal reference text, not arbitrary file content.
+            assert incident_number in (None, "&secret;", "secret")
+
+    def test_xxe_raises_or_returns_none(self):
+        """parse_alarm must not raise an unhandled exception on XXE input."""
+        xxe_xml = (
+            '<!DOCTYPE foo ['
+            '<!ENTITY xxe SYSTEM "file:///etc/hostname">'
+            ']>'
+            '<INCIDENT><ENR>&xxe;</ENR></INCIDENT>'
+        )
+        raw = _make_email(xxe_xml)
+        # Must not raise; defusedxml blocks entity expansion → ParseError → None
+        result = parse_alarm(raw)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
 # Tests: Parse-Fehler werden geloggt (#2)
 # ---------------------------------------------------------------------------
 
