@@ -6,6 +6,7 @@ import concurrent.futures
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -160,17 +161,34 @@ class PushService:
         if not self.alarm_messenger or not self.alarm_messenger.enabled:
             return
 
+        def _str(key: str, default: str = "—") -> str:
+            val = alarm_data.get(key)
+            return str(val).strip() if val is not None and str(val).strip() else default
+
+        timestamp = alarm_data.get("timestamp")
+        emergency_date = (
+            str(timestamp).strip()
+            if timestamp is not None and str(timestamp).strip()
+            else datetime.now(timezone.utc).isoformat()
+        )
+
         emergency_data: Dict[str, Any] = {
-            "emergencyNumber": alarm_data.get("incident_number", ""),
-            "emergencyDate": alarm_data.get("timestamp", ""),
-            "emergencyKeyword": alarm_data.get("keyword_primary", ""),
-            "emergencyDescription": alarm_data.get("diagnosis", ""),
-            "emergencyLocation": alarm_data.get("location", ""),
+            "emergencyNumber": _str("incident_number"),
+            "emergencyDate": emergency_date,
+            "emergencyKeyword": (
+                alarm_data.get("keyword_primary")
+                or alarm_data.get("keyword")
+                or "Unbekannt"
+            ),
+            "emergencyDescription": _str("diagnosis"),
+            "emergencyLocation": _str("location"),
         }
 
         dispatch_codes = alarm_data.get("dispatch_group_codes")
         if dispatch_codes:
             emergency_data["groups"] = ",".join(dispatch_codes)
+        else:
+            LOGGER.debug("No dispatch_group_codes found, groups omitted from messenger payload")
 
         url = f"{self.alarm_messenger.url}/api/emergencies"
         headers = {
