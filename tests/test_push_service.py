@@ -152,3 +152,143 @@ class TestPushAlarmConcurrent:
         svc = PushService(alarm_monitor=_monitor_target())
         svc.push_alarm({})
         mock_post.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _post_with_retry behaviour
+# ---------------------------------------------------------------------------
+
+class TestPostWithRetry:
+    def test_final_failure_logged_as_error(self, mocker, caplog):
+        """After all backoff sleeps are exhausted an ERROR must be emitted."""
+        import logging
+
+        mock_session = mocker.MagicMock()
+        mock_session.post.side_effect = requests.exceptions.ConnectionError("refused")
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+        mocker.patch("alarm_mail.push_service.time.sleep")
+
+        svc = PushService(alarm_monitor=_monitor_target())
+
+        with caplog.at_level(logging.ERROR, logger="alarm_mail.push_service"):
+            svc.push_alarm(_ALARM_DATA)
+
+        error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert error_records, "Expected at least one ERROR log after all retries exhausted"
+
+    def test_retry_count_matches_backoff_length(self, mocker):
+        """_post_with_retry attempts exactly len(backoff) times before giving up."""
+        mock_session = mocker.MagicMock()
+        mock_session.post.side_effect = requests.exceptions.ConnectionError("refused")
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+        mocker.patch("alarm_mail.push_service.time.sleep")
+
+        svc = PushService(alarm_monitor=_monitor_target())
+        # default backoff=[1, 5, 15] → 3 attempts total
+        svc._post_with_retry(
+            "http://monitor:8000/api/alarm",
+            _ALARM_DATA,
+            {"X-API-Key": "k"},
+            "alarm-monitor",
+        )
+        assert mock_session.post.call_count == 3
+
+    def test_timeout_error_retried(self, mocker):
+        """Timeout errors should trigger the same retry logic as connection errors."""
+        mock_session = mocker.MagicMock()
+        mock_session.post.side_effect = requests.exceptions.Timeout("timed out")
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+        mocker.patch("alarm_mail.push_service.time.sleep")
+
+        svc = PushService(alarm_monitor=_monitor_target())
+        svc.push_alarm(_ALARM_DATA)
+        # Should not raise and should have attempted at least once
+        assert mock_session.post.call_count >= 1
+
+    def test_verify_ssl_false_forwarded_to_requests(self, mocker):
+        mock_session = mocker.MagicMock()
+        mock_response = mocker.MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+
+        target = _monitor_target()
+        target.verify_ssl = False
+        svc = PushService(alarm_monitor=target)
+        svc.push_alarm(_ALARM_DATA)
+
+        assert mock_session.post.call_args.kwargs["verify"] is False
+
+    def test_verify_ssl_true_forwarded_to_requests(self, mocker):
+        mock_session = mocker.MagicMock()
+        mock_response = mocker.MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+
+        svc = PushService(alarm_monitor=_monitor_target())
+        svc.push_alarm(_ALARM_DATA)
+
+        assert mock_session.post.call_args.kwargs["verify"] is True
+
+    def test_http_timeout_forwarded_to_requests(self, mocker):
+        mock_session = mocker.MagicMock()
+        mock_response = mocker.MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+
+        svc = PushService(alarm_monitor=_monitor_target(), http_timeout=42)
+        svc.push_alarm(_ALARM_DATA)
+
+        assert mock_session.post.call_args.kwargs["timeout"] == 42
+
+    def test_success_on_second_attempt_after_transient_failure(self, mocker):
+        """A transient failure on the first attempt must not prevent a later success."""
+        mock_session = mocker.MagicMock()
+        good_response = mocker.MagicMock()
+        good_response.raise_for_status.return_value = None
+
+        call_count = {"n": 0}
+
+        def flaky_post(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise requests.exceptions.ConnectionError("first attempt fails")
+            return good_response
+
+        mock_session.post.side_effect = flaky_post
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+        mocker.patch("alarm_mail.push_service.time.sleep")
+
+        svc = PushService(alarm_monitor=_monitor_target())
+        svc.push_alarm(_ALARM_DATA)
+
+        assert call_count["n"] == 2
+
+    def test_monitor_failure_does_not_block_messenger(self, mocker):
+        """A failure pushing to monitor must not prevent pushing to messenger."""
+        call_urls = []
+
+        good_response = mocker.MagicMock()
+        good_response.raise_for_status.return_value = None
+
+        def post_side_effect(url, *args, **kwargs):
+            call_urls.append(url)
+            if "monitor" in url:
+                raise requests.exceptions.ConnectionError("monitor down")
+            return good_response
+
+        mock_session = mocker.MagicMock()
+        mock_session.post.side_effect = post_side_effect
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+        mocker.patch("alarm_mail.push_service.time.sleep")
+
+        svc = PushService(
+            alarm_monitor=_monitor_target(),
+            alarm_messenger=_messenger_target(),
+        )
+        svc.push_alarm(_ALARM_DATA)
+
+        messenger_calls = [u for u in call_urls if "emergencies" in u]
+        assert len(messenger_calls) >= 1

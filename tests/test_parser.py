@@ -259,3 +259,240 @@ class TestParseBodyHTMLFallback:
         assert "Musterstraße" in body
         assert "<p>" not in body
         assert "<strong>" not in body
+
+
+# ---------------------------------------------------------------------------
+# Tests: XXE safety (defusedxml must block entity expansion)
+# ---------------------------------------------------------------------------
+
+class TestXXESafety:
+    def test_xxe_entity_expansion_blocked(self):
+        """defusedxml must refuse an XXE payload rather than expanding it."""
+        import defusedxml.ElementTree as DET
+
+        xxe_payload = (
+            '<?xml version="1.0"?>'
+            '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+            "<INCIDENT><ENR>&xxe;</ENR></INCIDENT>"
+        )
+        raw = _make_email(xxe_payload)
+        # parse_alarm internally uses defusedxml; it must return None (parse error)
+        # or a result without the expanded entity — never the file contents.
+        result = parse_alarm(raw)
+        if result is not None:
+            enr = result.get("incident_number") or ""
+            assert "root:" not in enr, "XXE entity was expanded — defusedxml did not block it"
+
+    def test_xxe_billion_laughs_blocked(self):
+        """defusedxml must refuse a billion-laughs DTD entity bomb."""
+        bomb = (
+            '<?xml version="1.0"?>'
+            "<!DOCTYPE lolz ["
+            '  <!ENTITY lol "lol">'
+            '  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">'
+            '  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">'
+            "]>"
+            "<INCIDENT><ENR>&lol3;</ENR></INCIDENT>"
+        )
+        raw = _make_email(bomb)
+        result = parse_alarm(raw)
+        # Should return None or a result without millions of 'lol' characters.
+        if result is not None:
+            enr = result.get("incident_number") or ""
+            assert len(enr) < 10_000, "Billion-laughs entity was not blocked"
+
+
+# ---------------------------------------------------------------------------
+# Tests: _parse_timestamp edge cases
+# ---------------------------------------------------------------------------
+
+class TestTimestampParsing:
+    def _xml_with_timestamp(self, ts: str) -> bytes:
+        xml = f"<INCIDENT><ENR>1</ENR><EBEGINN>{ts}</EBEGINN></INCIDENT>"
+        return _make_email(xml)
+
+    def test_timestamp_without_seconds(self):
+        raw = self._xml_with_timestamp("08.12.2024 14:30")
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["timestamp"] == "2024-12-08T14:30:00"
+        assert result["timestamp_display"] == "08.12.2024 14:30"
+
+    def test_invalid_timestamp_returns_original_value(self):
+        raw = self._xml_with_timestamp("not-a-date")
+        result = parse_alarm(raw)
+        assert result is not None
+        # Fallback: original string is returned as-is
+        assert result["timestamp"] == "not-a-date"
+        assert result["timestamp_display"] == "not-a-date"
+
+    def test_missing_timestamp_returns_none(self):
+        xml = "<INCIDENT><ENR>1</ENR></INCIDENT>"
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["timestamp"] is None
+        assert result["timestamp_display"] is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: keyword field fallbacks
+# ---------------------------------------------------------------------------
+
+class TestKeywordFallbacks:
+    def test_stichwort_used_when_estichwort_1_absent(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <STICHWORT>THL</STICHWORT>
+              <ORT>Testdorf</ORT>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["keyword_primary"] == "THL"
+
+    def test_estichwort_1_preferred_over_stichwort(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <ESTICHWORT_1>F3Y</ESTICHWORT_1>
+              <STICHWORT>BRAND</STICHWORT>
+              <ORT>Testdorf</ORT>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["keyword_primary"] == "F3Y"
+
+    def test_keyword_secondary_extracted(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <ESTICHWORT_1>F3Y</ESTICHWORT_1>
+              <ESTICHWORT_2>Wohnungsbrand</ESTICHWORT_2>
+              <ORT>Testdorf</ORT>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["keyword_secondary"] == "Wohnungsbrand"
+
+    def test_keyword_display_combines_primary_and_diagnosis(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <ESTICHWORT_1>F3Y</ESTICHWORT_1>
+              <DIAGNOSE>Wohnungsbrand</DIAGNOSE>
+              <ORT>Testdorf</ORT>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["keyword"] == "F3Y – Wohnungsbrand"
+
+
+# ---------------------------------------------------------------------------
+# Tests: location variations
+# ---------------------------------------------------------------------------
+
+class TestLocationVariations:
+    def test_location_from_objekt_only(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <ESTICHWORT_1>F1</ESTICHWORT_1>
+              <OBJEKT>Schule am Marktplatz</OBJEKT>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["location"] == "Schule am Marktplatz"
+        assert result["location_details"]["object"] == "Schule am Marktplatz"
+
+    def test_location_includes_ortszusatz(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <ESTICHWORT_1>F1</ESTICHWORT_1>
+              <STRASSE>Hauptstr.</STRASSE>
+              <ORT>Musterstadt</ORT>
+              <ORTSZUSATZ>Hintereingang</ORTSZUSATZ>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert "Hintereingang" in result["location"]
+        assert result["location_details"]["additional"] == "Hintereingang"
+
+    def test_invalid_coordinates_return_none(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <ESTICHWORT_1>F1</ESTICHWORT_1>
+              <KOORDINATE_LAT>not-a-float</KOORDINATE_LAT>
+              <KOORDINATE_LON>also-invalid</KOORDINATE_LON>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["latitude"] is None
+        assert result["longitude"] is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: remark / note fields
+# ---------------------------------------------------------------------------
+
+class TestRemarkFields:
+    def test_eo_bemerkung_used_as_remark(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <ESTICHWORT_1>F1</ESTICHWORT_1>
+              <EO_BEMERKUNG>Vorsicht: Gasgeruch</EO_BEMERKUNG>
+              <ORT>Testdorf</ORT>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["remark"] == "Vorsicht: Gasgeruch"
+
+    def test_eozusatz_used_as_remark_fallback(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <ESTICHWORT_1>F1</ESTICHWORT_1>
+              <EOZUSATZ>Zufahrt über Nebenstraße</EOZUSATZ>
+              <ORT>Testdorf</ORT>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["remark"] == "Zufahrt über Nebenstraße"
+
+    def test_eo_bemerkung_preferred_over_eozusatz(self):
+        xml = textwrap.dedent("""\
+            <INCIDENT>
+              <ENR>1</ENR>
+              <ESTICHWORT_1>F1</ESTICHWORT_1>
+              <EO_BEMERKUNG>Hauptbemerkung</EO_BEMERKUNG>
+              <EOZUSATZ>Zusatz</EOZUSATZ>
+              <ORT>Testdorf</ORT>
+            </INCIDENT>
+        """)
+        raw = _make_email(xml)
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["remark"] == "Hauptbemerkung"
+
+

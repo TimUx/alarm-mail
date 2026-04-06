@@ -74,6 +74,7 @@ class PushService:
 
         if backoff is None:
             backoff = [1, 5, 15]
+        last_transient_exc: Optional[Exception] = None
         for attempt, wait in enumerate(backoff, start=1):
             try:
                 resp = self._session.post(
@@ -84,6 +85,7 @@ class PushService:
                 LOGGER.info("Successfully pushed alarm to %s", target_name)
                 return
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                last_transient_exc = exc
                 if attempt <= max_retries:
                     LOGGER.warning(
                         "Push to %s failed (attempt %d/%d): %s – retrying in %ds",
@@ -99,6 +101,11 @@ class PushService:
             except requests.exceptions.RequestException as exc:
                 LOGGER.error("Failed to push alarm to %s: %s", target_name, exc)
                 return
+        if last_transient_exc is not None:
+            LOGGER.error(
+                "Push to %s failed after %d attempts: %s",
+                target_name, len(backoff), last_transient_exc,
+            )
 
     def _push_to_monitor(self, alarm_data: Dict[str, Any]) -> None:
         """Push alarm data to alarm-monitor API."""
