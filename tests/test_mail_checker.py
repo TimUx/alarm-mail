@@ -215,13 +215,14 @@ class TestStartStopIsRunning:
 
     def test_is_running_false_after_stop(self, mocker):
         ready = threading.Event()
-
-        def slow_run():
-            ready.set()
-            time.sleep(5)
-
-        mocker.patch.object(AlarmMailFetcher, "_run", side_effect=slow_run)
         fetcher = _make_fetcher()
+        stop_event = fetcher._stop_event
+
+        def interruptible_run():
+            ready.set()
+            stop_event.wait(timeout=10)
+
+        mocker.patch.object(AlarmMailFetcher, "_run", side_effect=interruptible_run)
         fetcher.start()
         ready.wait(timeout=2)
         fetcher.stop()
