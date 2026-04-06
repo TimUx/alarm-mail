@@ -21,6 +21,14 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Überarbeitete QUICKSTART.md mit Schritt-für-Schritt-Anleitungen
 - docs/ Verzeichnis für erweiterte Dokumentation
 - docs/images/ für zukünftige Screenshots
+- Prometheus-kompatibler `/metrics`-Endpunkt (`alarm_mail_messages_processed_total`, `alarm_mail_push_success_total`, `alarm_mail_push_failure_total`, `alarm_mail_last_poll_timestamp_seconds`)
+- Retry-Mechanismus für fehlgeschlagene Pushes (exponentielles Backoff, 3 Versuche)
+- Konfigurierbare Timeout-Werte (`ALARM_MAIL_HTTP_TIMEOUT`)
+- Deduplizierung von Alarmen anhand der Einsatznummer (`ALARM_MAIL_DEDUP_TTL`, `ALARM_MAIL_DEDUP_DB` für SQLite-Persistenz)
+- MIME-Attachments und XML in multipart-E-Mails werden erkannt und verarbeitet
+- Exponentieller IMAP-Backoff bei Verbindungsfehlern
+- SSL-Verifikation für Targets konfigurierbar (`ALARM_MONITOR_VERIFY_SSL`, `ALARM_MESSENGER_VERIFY_SSL`)
+- Health-Check-Endpunkt zeigt jetzt detaillierten Polling-Status (`polling: running/stopped`)
 
 ### Geändert
 - Dokumentationsstruktur komplett überarbeitet
