@@ -127,6 +127,48 @@ class TestPushToMessenger:
         body = mock_post.call_args.kwargs["json"]
         assert "groups" not in body
 
+    def test_missing_required_fields_use_fallback(self, mocker):
+        """None or absent required fields must be replaced with '—' fallback."""
+        mock_post = _mock_post(mocker)
+        svc = PushService(alarm_messenger=_messenger_target())
+        alarm = {**_ALARM_DATA, "incident_number": None, "diagnosis": None, "location": None}
+        svc.push_alarm(alarm)
+        body = mock_post.call_args.kwargs["json"]
+        assert body["emergencyNumber"] == "—"
+        assert body["emergencyDescription"] == "—"
+        assert body["emergencyLocation"] == "—"
+
+    def test_blank_required_fields_use_fallback(self, mocker):
+        """Empty-string or whitespace-only values must also trigger the fallback."""
+        mock_post = _mock_post(mocker)
+        svc = PushService(alarm_messenger=_messenger_target())
+        alarm = {**_ALARM_DATA, "incident_number": "  ", "diagnosis": "", "location": "   "}
+        svc.push_alarm(alarm)
+        body = mock_post.call_args.kwargs["json"]
+        assert body["emergencyNumber"] == "—"
+        assert body["emergencyDescription"] == "—"
+        assert body["emergencyLocation"] == "—"
+
+    def test_missing_timestamp_uses_utc_fallback(self, mocker):
+        """When timestamp is absent, emergencyDate must be a non-empty ISO string."""
+        mock_post = _mock_post(mocker)
+        svc = PushService(alarm_messenger=_messenger_target())
+        alarm = {**_ALARM_DATA, "timestamp": None}
+        svc.push_alarm(alarm)
+        body = mock_post.call_args.kwargs["json"]
+        assert body["emergencyDate"]  # non-empty
+        assert "T" in body["emergencyDate"]  # looks like ISO timestamp
+
+    def test_blank_timestamp_uses_utc_fallback(self, mocker):
+        """When timestamp is blank, emergencyDate must be a non-empty ISO string."""
+        mock_post = _mock_post(mocker)
+        svc = PushService(alarm_messenger=_messenger_target())
+        alarm = {**_ALARM_DATA, "timestamp": ""}
+        svc.push_alarm(alarm)
+        body = mock_post.call_args.kwargs["json"]
+        assert body["emergencyDate"]
+        assert "T" in body["emergencyDate"]
+
     def test_http_error_does_not_raise(self, mocker):
         mock_response = mocker.MagicMock()
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("401")
