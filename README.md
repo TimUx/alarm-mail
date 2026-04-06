@@ -411,8 +411,9 @@ Aktiviert die Weiterleitung an das [alarm-monitor](https://github.com/TimUx/alar
 |----------|-----|--------------|
 | `ALARM_MONITOR_URL` | String | Basis-URL des alarm-monitor<br>Beispiel: `http://alarm-monitor:8000` oder `https://monitor.feuerwehr.de`<br>⚠️ Muss zusammen mit `ALARM_MONITOR_API_KEY` gesetzt sein |
 | `ALARM_MONITOR_API_KEY` | String | API-Schlüssel für Authentifizierung<br>Wird vom alarm-monitor über `ALARM_DASHBOARD_API_KEY` definiert<br>⚠️ Geheim halten! |
+| `ALARM_MONITOR_VERIFY_SSL` | Boolean | SSL-Zertifikat des alarm-monitor prüfen<br>Standard: `true`. Nur für selbstsignierte Zertifikate deaktivieren. |
 
-**Hinweis:** Beide Variablen müssen gesetzt sein, damit die Integration aktiv ist.
+**Hinweis:** `ALARM_MONITOR_URL` und `ALARM_MONITOR_API_KEY` müssen beide gesetzt sein, damit die Integration aktiv ist.
 
 #### 📱 Alarm Messenger Integration (Optional)
 
@@ -422,8 +423,18 @@ Aktiviert die Weiterleitung an den [alarm-messenger](https://github.com/TimUx/al
 |----------|-----|--------------|
 | `ALARM_MESSENGER_URL` | String | Basis-URL des alarm-messenger<br>Beispiel: `http://alarm-messenger:3000` oder `https://messenger.feuerwehr.de`<br>⚠️ Muss zusammen mit `ALARM_MESSENGER_API_KEY` gesetzt sein |
 | `ALARM_MESSENGER_API_KEY` | String | API-Schlüssel für Authentifizierung<br>Wird vom alarm-messenger über `API_SECRET_KEY` definiert<br>⚠️ Geheim halten! |
+| `ALARM_MESSENGER_VERIFY_SSL` | Boolean | SSL-Zertifikat des alarm-messenger prüfen<br>Standard: `true`. Nur für selbstsignierte Zertifikate deaktivieren. |
 
-**Hinweis:** Beide Variablen müssen gesetzt sein, damit die Integration aktiv ist.
+**Hinweis:** `ALARM_MESSENGER_URL` und `ALARM_MESSENGER_API_KEY` müssen beide gesetzt sein, damit die Integration aktiv ist.
+
+#### ⚙️ Weitere optionale Einstellungen
+
+| Variable | Typ | Default | Beschreibung |
+|----------|-----|---------|--------------|
+| `HTTP_TIMEOUT` | Integer | `10` | Timeout in Sekunden für ausgehende HTTP-Requests an Targets |
+| `LOG_LEVEL` | String | `INFO` | Log-Level des Service<br>Werte: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `DEDUP_TTL` | Integer | `300` | Gültigkeitsdauer (Sekunden) für die Duplikat-Erkennung anhand der Einsatznummer |
+| `DEDUP_DB` | String | – | Optionaler Pfad zu einer SQLite-Datei für persistente Duplikat-Erkennung (überlebt Neustarts) |
 
 ### Konfigurationsbeispiele
 
@@ -573,7 +584,6 @@ ALARM_DASHBOARD_API_KEY=ihr-geheimer-monitor-key
 | `keyword_primary` | String | Hauptstichwort (z.B. "F3Y") |
 | `keyword_secondary` | String | Unterstichwort |
 | `diagnosis` | String | Einsatzdiagnose |
-| `description` | String | Einsatzbeschreibung |
 | `remark` | String | Bemerkungen zum Einsatz |
 | `location` | String | Vollständige Ortsangabe |
 | `location_details` | Object | Strukturierte Ortsinformationen |
@@ -631,7 +641,7 @@ Der alarm-mail Service konvertiert die XML-Daten automatisch in das von alarm-me
 | `incident_number` | `emergencyNumber` |
 | `timestamp` | `emergencyDate` |
 | `keyword_primary` | `emergencyKeyword` |
-| `diagnosis` / `description` | `emergencyDescription` |
+| `diagnosis` | `emergencyDescription` |
 | `location` | `emergencyLocation` |
 | `dispatch_group_codes` | `groups` (optional) |
 
@@ -687,7 +697,7 @@ ALARM_MAIL_ALARM_MESSENGER_API_KEY=messenger-key
 
 ## 📡 API-Dokumentation
 
-Der alarm-mail Service stellt zwei REST-Endpunkte bereit.
+Der alarm-mail Service stellt drei REST-Endpunkte bereit.
 
 ### GET /health
 
@@ -702,6 +712,16 @@ curl http://localhost:8000/health
 ```json
 {
   "status": "ok",
+  "polling": "running",
+  "service": "alarm-mail"
+}
+```
+
+**Response:** `503 Service Unavailable` (wenn der Polling-Thread nicht läuft)
+```json
+{
+  "status": "degraded",
+  "polling": "stopped",
   "service": "alarm-mail"
 }
 ```
@@ -764,6 +784,53 @@ curl http://localhost:8000/
   "targets": [],
   "poll_interval": 60
 }
+```
+
+### GET /metrics
+
+**Prometheus-kompatibler Metriken-Endpunkt** im Plain-Text-Format.
+
+**Request:**
+```bash
+curl http://localhost:8000/metrics
+```
+
+**Response:** `200 OK` (`text/plain; version=0.0.4`)
+```
+# HELP alarm_mail_messages_processed_total Total number of emails processed
+# TYPE alarm_mail_messages_processed_total counter
+alarm_mail_messages_processed_total 42
+
+# HELP alarm_mail_push_success_total Successful pushes per target
+# TYPE alarm_mail_push_success_total counter
+alarm_mail_push_success_total{target="alarm-monitor"} 40
+alarm_mail_push_success_total{target="alarm-messenger"} 41
+
+# HELP alarm_mail_push_failure_total Failed pushes per target
+# TYPE alarm_mail_push_failure_total counter
+alarm_mail_push_failure_total{target="alarm-monitor"} 2
+alarm_mail_push_failure_total{target="alarm-messenger"} 1
+
+# HELP alarm_mail_last_poll_timestamp_seconds Unix timestamp of last successful poll
+# TYPE alarm_mail_last_poll_timestamp_seconds gauge
+alarm_mail_last_poll_timestamp_seconds 1749123456.789
+```
+
+**Verfügbare Metriken:**
+
+| Metrik | Typ | Beschreibung |
+|--------|-----|--------------|
+| `alarm_mail_messages_processed_total` | Counter | Gesamtanzahl der verarbeiteten E-Mails seit Start |
+| `alarm_mail_push_success_total` | Counter | Erfolgreiche API-Pushes, aufgeschlüsselt nach Target |
+| `alarm_mail_push_failure_total` | Counter | Fehlgeschlagene API-Pushes, aufgeschlüsselt nach Target |
+| `alarm_mail_last_poll_timestamp_seconds` | Gauge | Unix-Timestamp des letzten erfolgreichen IMAP-Polls |
+
+**Prometheus-Konfiguration:**
+```yaml
+- job_name: 'alarm-mail'
+  static_configs:
+    - targets: ['alarm-mail:8000']
+  metrics_path: /metrics
 ```
 
 ---
@@ -1243,12 +1310,20 @@ sudo journalctl -u alarm-mail -p err
 ```bash
 curl http://localhost:8000/health
 
-# Expected: {"status":"ok","service":"alarm-mail"}
+# Expected: {"status":"ok","polling":"running","service":"alarm-mail"}
 ```
 
 **Automatisches Monitoring mit Prometheus:**
 
-Für erweitertes Monitoring kann ein Prometheus-Exporter hinzugefügt werden.
+Der Service stellt einen nativen `/metrics`-Endpunkt bereit. Dieser liefert Counters für verarbeitete E-Mails, Push-Erfolge und Push-Fehler sowie einen Timestamp des letzten Polls (siehe [API-Dokumentation](#-api-dokumentation)).
+
+**Prometheus-Konfiguration:**
+```yaml
+- job_name: 'alarm-mail'
+  static_configs:
+    - targets: ['alarm-mail:8000']
+  metrics_path: /metrics
+```
 
 **Shell-Script für Monitoring:**
 ```bash
@@ -1274,22 +1349,12 @@ exit 0
 check_http -H localhost -p 8000 -u /health -s "ok"
 ```
 
-**Prometheus mit Blackbox Exporter:**
+**Prometheus (nativer `/metrics`-Endpunkt):**
 ```yaml
 - job_name: 'alarm-mail'
-  metrics_path: /probe
-  params:
-    module: [http_2xx]
   static_configs:
-    - targets:
-      - http://alarm-mail:8000/health
-  relabel_configs:
-    - source_labels: [__address__]
-      target_label: __param_target
-    - source_labels: [__param_target]
-      target_label: instance
-    - target_label: __address__
-      replacement: blackbox-exporter:9115
+    - targets: ['alarm-mail:8000']
+  metrics_path: /metrics
 ```
 
 **Uptime Kuma:**
@@ -1333,6 +1398,13 @@ alarm-mail/
 │   ├── parser.py           # XML-Parsing-Logik
 │   └── push_service.py     # API-Push-Service
 │
+├── tests/                   # Unit Tests
+│   ├── test_app.py         # Tests für Flask App
+│   ├── test_config.py      # Tests für Konfiguration
+│   ├── test_mail_checker.py# Tests für IMAP-Fetcher
+│   ├── test_parser.py      # Tests für XML-Parser
+│   └── test_push_service.py# Tests für Push Service
+│
 ├── docs/                    # Dokumentation (erweitert)
 │   ├── images/             # Screenshots & Diagramme
 │   └── examples/           # Beispiel-Konfigurationen
@@ -1340,11 +1412,13 @@ alarm-mail/
 ├── .env.example            # Beispiel-Konfiguration
 ├── .gitignore              # Git-Ignore-Regeln
 ├── compose.yaml            # Docker Compose Definition
+├── CONTRIBUTING.md         # Beiträge-Richtlinien
 ├── Dockerfile              # Container-Image-Build
 ├── LICENSE                 # MIT Lizenz
 ├── README.md               # Hauptdokumentation
 ├── QUICKSTART.md           # Schnellstart-Anleitung
 ├── requirements.txt        # Python-Abhängigkeiten
+├── requirements-test.txt   # Test-Abhängigkeiten
 └── alarm-mail.service      # Systemd-Service-Datei
 ```
 
@@ -1791,7 +1865,7 @@ Für erweiterte Fehlersuche:
 # In app.py temporär ändern:
 # logging.basicConfig(level=logging.DEBUG, ...)
 
-# Oder via Umgebungsvariable (falls implementiert)
+# Oder via Umgebungsvariable:
 export ALARM_MAIL_LOG_LEVEL=DEBUG
 ```
 
@@ -1845,7 +1919,7 @@ Wir freuen uns über jede Form von Beitrag:
 3. Änderungen committen
 4. Pull Request öffnen
 
-Siehe auch: [CONTRIBUTING.md](CONTRIBUTING.md) (falls vorhanden)
+Siehe auch: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ---
 

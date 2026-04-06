@@ -77,7 +77,7 @@ docker compose logs -f alarm-mail
 
 # Health-Check
 curl http://localhost:8000/health
-# Expected: {"status":"ok","service":"alarm-mail"}
+# Expected: {"status":"ok","polling":"running","service":"alarm-mail"}
 
 # Service-Info
 curl http://localhost:8000/
