@@ -21,7 +21,7 @@ from .push_service import PushService
 LOGGER = logging.getLogger(__name__)
 
 _DEDUP_MAX_SIZE = 50
-_DEDUP_TTL_SECONDS = 300  # 5 minutes
+_DEDUP_TTL_SECONDS = 300  # default; overridden by config.dedup_ttl
 
 # Human-readable table of all ALARM_MAIL_* environment variables
 _ENV_VAR_TABLE = [
@@ -42,6 +42,7 @@ _ENV_VAR_TABLE = [
     ("LOG_LEVEL",                     False, False),
     ("ALARM_MONITOR_VERIFY_SSL",      False, False),
     ("ALARM_MESSENGER_VERIFY_SSL",    False, False),
+    ("DEDUP_TTL",                     False, False),
 ]
 
 
@@ -77,8 +78,11 @@ class AlarmMailApp:
             http_timeout=config.http_timeout,
         )
         self.mail_fetcher: Optional[AlarmMailFetcher] = None
+        self._dedup_ttl = config.dedup_ttl
         self._dedup_cache: collections.OrderedDict = collections.OrderedDict()
         self._dedup_lock = threading.Lock()
+        self._messages_processed = 0
+        self._messages_lock = threading.Lock()
 
         # Optional persistent dedup store
         self._dedup_db_path: Optional[str] = os.environ.get("ALARM_MAIL_DEDUP_DB")
@@ -94,7 +98,7 @@ class AlarmMailApp:
             )
             conn.commit()
             # Load non-expired entries into the in-memory cache
-            cutoff = time.time() - _DEDUP_TTL_SECONDS
+            cutoff = time.time() - self._dedup_ttl
             conn.execute(
                 "DELETE FROM processed_incidents WHERE seen_at < ?", (cutoff,)
             )
@@ -148,10 +152,10 @@ class AlarmMailApp:
                 with self._dedup_lock:
                     if incident_number in self._dedup_cache:
                         last_seen = self._dedup_cache[incident_number]
-                        if now - last_seen < _DEDUP_TTL_SECONDS:
+                        if now - last_seen < self._dedup_ttl:
                             LOGGER.warning(
                                 "Duplicate incident (same number seen within last %d seconds), skipping push",
-                                _DEDUP_TTL_SECONDS,
+                                self._dedup_ttl,
                             )
                             return
                     self._dedup_cache[incident_number] = now
@@ -165,6 +169,9 @@ class AlarmMailApp:
                 alarm_data.get("incident_number", "unknown"),
                 alarm_data.get("keyword", "unknown"),
             )
+
+            with self._messages_lock:
+                self._messages_processed += 1
 
             self.push_service.push_alarm(alarm_data)
 
@@ -219,6 +226,65 @@ def create_app() -> Flask:
             "targets": targets,
             "poll_interval": config.poll_interval,
         })
+
+    @app.route("/metrics")
+    def metrics():
+        """Prometheus-compatible plain-text metrics endpoint."""
+        push_metrics = alarm_app.push_service.metrics.snapshot()
+
+        fetcher: Optional[AlarmMailFetcher] = alarm_app.mail_fetcher
+        last_poll_ts: float = 0.0
+        if fetcher is not None:
+            ts = fetcher._state.last_poll_timestamp
+            if ts is not None:
+                last_poll_ts = ts
+
+        with alarm_app._messages_lock:
+            total_processed = alarm_app._messages_processed
+
+        target_names = []
+        if config.alarm_monitor:
+            target_names.append("alarm-monitor")
+        if config.alarm_messenger:
+            target_names.append("alarm-messenger")
+
+        lines = [
+            "# HELP alarm_mail_messages_processed_total"
+            " Total number of emails processed",
+            "# TYPE alarm_mail_messages_processed_total counter",
+            f"alarm_mail_messages_processed_total {total_processed}",
+            "",
+            "# HELP alarm_mail_push_success_total"
+            " Successful pushes per target",
+            "# TYPE alarm_mail_push_success_total counter",
+        ]
+        for t in target_names:
+            val = push_metrics["push_success"].get(t, 0)
+            lines.append(
+                f'alarm_mail_push_success_total{{target="{t}"}} {val}'
+            )
+        lines += [
+            "",
+            "# HELP alarm_mail_push_failure_total"
+            " Failed pushes per target",
+            "# TYPE alarm_mail_push_failure_total counter",
+        ]
+        for t in target_names:
+            val = push_metrics["push_failure"].get(t, 0)
+            lines.append(
+                f'alarm_mail_push_failure_total{{target="{t}"}} {val}'
+            )
+        lines += [
+            "",
+            "# HELP alarm_mail_last_poll_timestamp_seconds"
+            " Unix timestamp of last successful poll",
+            "# TYPE alarm_mail_last_poll_timestamp_seconds gauge",
+            f"alarm_mail_last_poll_timestamp_seconds {last_poll_ts}",
+            "",
+        ]
+
+        from flask import Response
+        return Response("\n".join(lines), mimetype="text/plain; version=0.0.4")
 
     alarm_app.start()
 

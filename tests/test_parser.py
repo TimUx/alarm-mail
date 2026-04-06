@@ -496,3 +496,86 @@ class TestRemarkFields:
         assert result["remark"] == "Hauptbemerkung"
 
 
+# ---------------------------------------------------------------------------
+# Tests: Parse-Fehler werden geloggt (#2)
+# ---------------------------------------------------------------------------
+
+class TestParseErrorLogging:
+    def test_broken_xml_logs_warning(self, caplog):
+        import logging
+        raw = _make_email("<INCIDENT><ENR>123</ENR><BROKEN")
+        with caplog.at_level(logging.WARNING, logger="alarm_mail.parser"):
+            result = parse_alarm(raw)
+        assert result is None
+        assert any("INCIDENT" in r.message or "parse" in r.message.lower()
+                   for r in caplog.records)
+
+    def test_warning_contains_payload_preview(self, caplog):
+        import logging
+        raw = _make_email("<INCIDENT><ENR>PREVIEW123</ENR><BROKEN")
+        with caplog.at_level(logging.WARNING, logger="alarm_mail.parser"):
+            parse_alarm(raw)
+        combined = " ".join(r.message for r in caplog.records)
+        assert "INCIDENT" in combined
+
+
+# ---------------------------------------------------------------------------
+# Tests: XML MIME-Attachment-Handling (#6)
+# ---------------------------------------------------------------------------
+
+class TestXMLAttachmentHandling:
+    def _make_xml_attachment_email(self, content_type: str) -> bytes:
+        """Build a multipart email with an XML attachment (no text/plain body)."""
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = "Alarm XML Attachment"
+        msg["From"] = "leitstelle@example.com"
+        msg["To"] = "alarm@example.com"
+
+        xml_part = MIMEBase("application", "xml")
+        xml_part.set_payload(_VALID_XML.encode("utf-8"))
+        xml_part.set_type(content_type)
+        xml_part.set_param("charset", "utf-8")
+        encoders.encode_base64(xml_part)
+        msg.attach(xml_part)
+        return msg.as_bytes()
+
+    def test_application_xml_attachment_parsed(self):
+        raw = self._make_xml_attachment_email("application/xml")
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["incident_number"] == "2024-001"
+
+    def test_text_xml_attachment_parsed(self):
+        raw = self._make_xml_attachment_email("text/xml")
+        result = parse_alarm(raw)
+        assert result is not None
+        assert result["incident_number"] == "2024-001"
+
+    def test_plain_text_preferred_over_xml_attachment(self):
+        """When a text/plain part has no INCIDENT, XML attachment is tried next."""
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        from email.mime.base import MIMEBase
+        from email import encoders
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = "Mixed"
+        msg["From"] = "a@b.com"
+        msg["To"] = "c@d.com"
+        msg.attach(MIMEText("No incident here", "plain", "utf-8"))
+
+        xml_part = MIMEBase("application", "xml")
+        xml_part.set_payload(_VALID_XML.encode("utf-8"))
+        xml_part.set_type("application/xml")
+        xml_part.set_param("charset", "utf-8")
+        encoders.encode_base64(xml_part)
+        msg.attach(xml_part)
+
+        # text/plain has no INCIDENT → falls through to XML attachment
+        result = parse_alarm(msg.as_bytes())
+        assert result is not None
+        assert result["incident_number"] == "2024-001"

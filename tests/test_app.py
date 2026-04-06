@@ -195,3 +195,116 @@ class TestFlaskRoutes:
         data = resp.get_json()
         assert data["status"] == "ok"
         assert data["polling"] == "running"
+
+
+# ---------------------------------------------------------------------------
+# Tests: configurable dedup TTL (#4)
+# ---------------------------------------------------------------------------
+
+class TestConfigurableDeduplicateTTL:
+    def _make_app(self, dedup_ttl: int = 300) -> AlarmMailApp:
+        config = AppConfig(
+            mail=_make_mail_config(),
+            alarm_monitor=_make_target("http://monitor:8000"),
+            dedup_ttl=dedup_ttl,
+        )
+        app = AlarmMailApp(config)
+        app.push_service = MagicMock()
+        return app
+
+    def test_custom_ttl_respected(self):
+        app = self._make_app(dedup_ttl=10)
+        assert app._dedup_ttl == 10
+
+    def test_duplicate_within_custom_ttl_skipped(self):
+        app = self._make_app(dedup_ttl=60)
+        app._handle_email(_VALID_XML_EMAIL)
+        app._handle_email(_VALID_XML_EMAIL)
+        assert app.push_service.push_alarm.call_count == 1
+
+    def test_expired_custom_ttl_allows_reprocessing(self):
+        app = self._make_app(dedup_ttl=5)
+        stale_time = time.time() - 10  # older than TTL of 5s
+        with app._dedup_lock:
+            app._dedup_cache["2024-001"] = stale_time
+        app._handle_email(_VALID_XML_EMAIL)
+        app.push_service.push_alarm.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests: messages_processed counter (#5)
+# ---------------------------------------------------------------------------
+
+class TestMessagesProcessedCounter:
+    def _make_app(self) -> AlarmMailApp:
+        config = _make_config()
+        app = AlarmMailApp(config)
+        app.push_service = MagicMock()
+        return app
+
+    def test_counter_starts_at_zero(self):
+        app = self._make_app()
+        assert app._messages_processed == 0
+
+    def test_counter_incremented_on_valid_email(self):
+        app = self._make_app()
+        app._handle_email(_VALID_XML_EMAIL)
+        assert app._messages_processed == 1
+
+    def test_counter_not_incremented_on_invalid_email(self):
+        app = self._make_app()
+        app._handle_email(_NO_XML_EMAIL)
+        assert app._messages_processed == 0
+
+    def test_counter_incremented_multiple_times(self):
+        app = self._make_app()
+        second_email = _VALID_XML_EMAIL.replace(b"2024-001", b"2024-002")
+        third_email = _VALID_XML_EMAIL.replace(b"2024-001", b"2024-003")
+        app._handle_email(_VALID_XML_EMAIL)
+        app._handle_email(second_email)
+        app._handle_email(third_email)
+        assert app._messages_processed == 3
+
+
+# ---------------------------------------------------------------------------
+# Tests: /metrics endpoint (#5)
+# ---------------------------------------------------------------------------
+
+class TestMetricsEndpoint:
+    @pytest.fixture()
+    def client(self, monkeypatch):
+        monkeypatch.setenv("ALARM_MAIL_IMAP_HOST", "imap.example.com")
+        monkeypatch.setenv("ALARM_MAIL_IMAP_USERNAME", "user@example.com")
+        monkeypatch.setenv("ALARM_MAIL_IMAP_PASSWORD", "secret")
+        monkeypatch.setenv("ALARM_MAIL_ALARM_MONITOR_URL", "http://monitor:8000")
+        monkeypatch.setenv("ALARM_MAIL_ALARM_MONITOR_API_KEY", "key")
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MESSENGER_URL", raising=False)
+        monkeypatch.delenv("ALARM_MAIL_ALARM_MESSENGER_API_KEY", raising=False)
+
+        with patch("alarm_mail.app.AlarmMailFetcher.start"):
+            from alarm_mail.app import create_app
+            flask_app = create_app()
+            flask_app.config["TESTING"] = True
+            with flask_app.test_client() as c:
+                yield c
+
+    def test_metrics_returns_200(self, client):
+        resp = client.get("/metrics")
+        assert resp.status_code == 200
+
+    def test_metrics_content_type(self, client):
+        resp = client.get("/metrics")
+        assert "text/plain" in resp.content_type
+
+    def test_metrics_contains_required_keys(self, client):
+        resp = client.get("/metrics")
+        body = resp.data.decode()
+        assert "alarm_mail_messages_processed_total" in body
+        assert "alarm_mail_push_success_total" in body
+        assert "alarm_mail_push_failure_total" in body
+        assert "alarm_mail_last_poll_timestamp_seconds" in body
+
+    def test_metrics_contains_target_labels(self, client):
+        resp = client.get("/metrics")
+        body = resp.data.decode()
+        assert 'target="alarm-monitor"' in body

@@ -72,6 +72,7 @@ class AppConfig:
     alarm_messenger: Optional[TargetConfig] = None
     http_timeout: int = 10
     log_level: str = "INFO"
+    dedup_ttl: int = 300
 
 
 class MissingConfiguration(RuntimeError):
@@ -112,6 +113,24 @@ def _require_env(name: str) -> str:
     return value
 
 
+def _get_int_env(name: str, default: int) -> int:
+    """Fetch an integer environment variable with a default fallback.
+
+    Raises :class:`MissingConfiguration` when the variable is set to a
+    non-integer value so that callers receive a clear error message instead
+    of an unhandled :class:`ValueError`.
+    """
+
+    raw = _get_env(name, default=str(default))
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        raise MissingConfiguration(
+            f"Invalid value for {ENV_PREFIX}{name}: {raw!r}."
+            " Expected an integer."
+        )
+
+
 def load_config() -> AppConfig:
     """Load application configuration from environment variables."""
 
@@ -143,13 +162,13 @@ def load_config() -> AppConfig:
         username=username,
         password=password,
         mailbox=_get_env("IMAP_MAILBOX", default="INBOX") or "INBOX",
-        port=int(_get_env("IMAP_PORT", default="993") or "993"),
+        port=_get_int_env("IMAP_PORT", default=993),
         use_ssl=use_ssl,
         search_criteria=search_criteria,
     )
 
-    poll_interval = int(_get_env("POLL_INTERVAL", default="60") or "60")
-    http_timeout = int(_get_env("HTTP_TIMEOUT", default="10") or "10")
+    poll_interval = _get_int_env("POLL_INTERVAL", default=60)
+    http_timeout = _get_int_env("HTTP_TIMEOUT", default=10)
     log_level = _get_env("LOG_LEVEL", default="INFO") or "INFO"
 
     # Alarm Monitor configuration (optional)
@@ -210,6 +229,7 @@ def load_config() -> AppConfig:
         alarm_messenger=alarm_messenger,
         http_timeout=http_timeout,
         log_level=log_level.upper(),
+        dedup_ttl=_get_int_env("DEDUP_TTL", default=300),
     )
 
 
