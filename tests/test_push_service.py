@@ -379,3 +379,65 @@ class TestPushMetrics:
         snap = svc.metrics.snapshot()
         assert snap["push_success"] == {}
         assert snap["push_failure"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Tests: SSL verification warnings
+# ---------------------------------------------------------------------------
+
+class TestSSLVerificationWarnings:
+    def test_monitor_ssl_disabled_logs_warning(self, mocker, caplog):
+        """Disabling SSL verification for alarm-monitor must emit a WARNING."""
+        import logging
+
+        mock_session = mocker.MagicMock()
+        mock_response = mocker.MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+
+        target = _monitor_target()
+        target.verify_ssl = False
+        svc = PushService(alarm_monitor=target)
+
+        with caplog.at_level(logging.WARNING, logger="alarm_mail.push_service"):
+            svc.push_alarm(_ALARM_DATA)
+
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("SSL" in m and "alarm-monitor" in m for m in warning_messages)
+
+    def test_messenger_ssl_disabled_logs_warning(self, mocker, caplog):
+        """Disabling SSL verification for alarm-messenger must emit a WARNING."""
+        import logging
+
+        mock_session = mocker.MagicMock()
+        mock_response = mocker.MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+        mocker.patch("alarm_mail.push_service.requests.Session", return_value=mock_session)
+
+        target = _messenger_target()
+        target.verify_ssl = False
+        svc = PushService(alarm_messenger=target)
+
+        with caplog.at_level(logging.WARNING, logger="alarm_mail.push_service"):
+            svc.push_alarm(_ALARM_DATA)
+
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("SSL" in m and "alarm-messenger" in m for m in warning_messages)
+
+    def test_monitor_ssl_enabled_no_warning(self, mocker, caplog):
+        """When SSL verification is enabled, no SSL warning must be emitted."""
+        import logging
+
+        _mock_post(mocker)
+        svc = PushService(alarm_monitor=_monitor_target())  # verify_ssl=True by default
+
+        with caplog.at_level(logging.WARNING, logger="alarm_mail.push_service"):
+            svc.push_alarm(_ALARM_DATA)
+
+        ssl_warnings = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "SSL" in r.message
+        ]
+        assert not ssl_warnings

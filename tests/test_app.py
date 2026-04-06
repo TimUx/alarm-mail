@@ -308,3 +308,35 @@ class TestMetricsEndpoint:
         resp = client.get("/metrics")
         body = resp.data.decode()
         assert 'target="alarm-monitor"' in body
+
+
+# ---------------------------------------------------------------------------
+# Tests: dedup SQLite path creation and error handling
+# ---------------------------------------------------------------------------
+
+class TestDedupSQLitePath:
+    def test_parent_directory_created(self, tmp_path):
+        """AlarmMailApp must create the parent directory for the SQLite db."""
+        import os
+        db_path = str(tmp_path / "subdir" / "nested" / "dedup.db")
+        with patch.dict("os.environ", {"ALARM_MAIL_DEDUP_DB": db_path}):
+            AlarmMailApp(_make_config())
+        assert os.path.isdir(os.path.dirname(db_path))
+
+    def test_in_memory_when_no_db_path(self):
+        """No SQLite is opened when ALARM_MAIL_DEDUP_DB is unset."""
+        import os
+        env = {k: v for k, v in os.environ.items() if k != "ALARM_MAIL_DEDUP_DB"}
+        with patch.dict("os.environ", env, clear=True):
+            app = AlarmMailApp(_make_config())
+        assert app._dedup_db_path is None
+
+    def test_sqlite_init_error_is_logged_not_raised(self, caplog):
+        """A bad db path must log a specific warning, not crash the app."""
+        import logging
+        with patch("alarm_mail.app.os.makedirs", side_effect=OSError("permission denied")):
+            with patch.dict("os.environ", {"ALARM_MAIL_DEDUP_DB": "/some/path/dedup.db"}):
+                with caplog.at_level(logging.WARNING):
+                    AlarmMailApp(_make_config())
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("Failed to create dedup database directory" in m for m in warning_messages)

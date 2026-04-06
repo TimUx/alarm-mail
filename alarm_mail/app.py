@@ -91,20 +91,33 @@ class AlarmMailApp:
 
     def _init_dedup_db(self) -> None:
         """Initialise the SQLite dedup database and pre-load recent entries."""
-        with sqlite3.connect(self._dedup_db_path) as conn:  # type: ignore[arg-type]
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS processed_incidents "
-                "(incident_number TEXT PRIMARY KEY, seen_at REAL)"
-            )
-            conn.commit()
-            # Load non-expired entries into the in-memory cache
-            cutoff = time.time() - self._dedup_ttl
-            conn.execute(
-                "DELETE FROM processed_incidents WHERE seen_at < ?", (cutoff,)
-            )
-            conn.commit()
-            for row in conn.execute("SELECT incident_number, seen_at FROM processed_incidents"):
-                self._dedup_cache[row[0]] = row[1]
+        db_path = self._dedup_db_path
+        if not db_path:
+            return
+        parent = os.path.dirname(db_path)
+        if parent:
+            try:
+                os.makedirs(parent, exist_ok=True)
+            except OSError as exc:
+                LOGGER.warning("Failed to create dedup database directory: %s", exc)
+                return
+        try:
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS processed_incidents "
+                    "(incident_number TEXT PRIMARY KEY, seen_at REAL)"
+                )
+                conn.commit()
+                # Load non-expired entries into the in-memory cache
+                cutoff = time.time() - self._dedup_ttl
+                conn.execute(
+                    "DELETE FROM processed_incidents WHERE seen_at < ?", (cutoff,)
+                )
+                conn.commit()
+                for row in conn.execute("SELECT incident_number, seen_at FROM processed_incidents"):
+                    self._dedup_cache[row[0]] = row[1]
+        except sqlite3.Error as exc:
+            LOGGER.warning("Failed to initialise dedup SQLite database: %s", exc)
 
     def _dedup_db_insert(self, incident_number: str, seen_at: float) -> None:
         """Persist a new incident number to the SQLite dedup store."""
