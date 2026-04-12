@@ -322,7 +322,7 @@ class TestMultiTargetConfig:
         monkeypatch.setenv("ALARM_MAIL_TARGET_1_URL", "http://monitor1:8000")
         monkeypatch.setenv("ALARM_MAIL_TARGET_1_API_KEY", "key1")
         monkeypatch.setenv("ALARM_MAIL_TARGET_1_TYPE", "invalid-type")
-        with pytest.raises(MissingConfiguration, match="TARGET_1_TYPE"):
+        with pytest.raises(MissingConfiguration, match="TARGET_1_TYPE.*alarm-monitor.*alarm-messenger"):
             load_config()
 
     def test_target_api_key_is_secret(self, monkeypatch):
