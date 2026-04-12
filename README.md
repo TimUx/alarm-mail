@@ -82,7 +82,8 @@ Die Leitstelle sendet Alarmmeldungen als E-Mail mit XML-Anhang an ein Postfach. 
 - ✅ Push an alarm-messenger im Emergency-Format
 - ✅ API-Key-basierte Authentifizierung
 - ✅ Automatische Format-Konvertierung für verschiedene Zielsysteme
-- ✅ Gleichzeitige Unterstützung mehrerer Targets
+- ✅ Multi-Target-Support: beliebig viele Targets konfigurierbar (`TARGET_<N>_*`)
+- ✅ Gruppenfilter je Target: Alarme werden nur an zuständige Targets weitergeleitet
 - ✅ Fehlertoleranz bei Target-Ausfällen
 
 ### Betrieb & Monitoring
@@ -123,6 +124,7 @@ Die Leitstelle sendet Alarmmeldungen als E-Mail mit XML-Anhang an ein Postfach. 
         │  │   IMAP Fetcher                  │ │
         │  │   - Verbindung zu IMAP          │ │
         │  │   - Polling neuer E-Mails       │ │
+        │  │   - Markierung erst nach Push   │ │
         │  └──────────┬──────────────────────┘ │
         │             │                         │
         │             ▼                         │
@@ -130,7 +132,7 @@ Die Leitstelle sendet Alarmmeldungen als E-Mail mit XML-Anhang an ein Postfach. 
         │  │   XML Parser                    │ │
         │  │   - INCIDENT-XML parsen         │ │
         │  │   - Daten extrahieren           │ │
-        │  │   - Strukturieren               │ │
+        │  │   - Dispatch-Codes (TME)        │ │
         │  └──────────┬──────────────────────┘ │
         │             │                         │
         │             ▼                         │
@@ -138,27 +140,31 @@ Die Leitstelle sendet Alarmmeldungen als E-Mail mit XML-Anhang an ein Postfach. 
         │  │   Push Service                  │ │
         │  │   - Format-Konvertierung        │ │
         │  │   - API-Authentifizierung       │ │
-        │  │   - Target-Distribution         │ │
+        │  │   - Gruppenfilter je Target     │ │
+        │  │   - Multi-Target-Distribution   │ │
         │  └──────────┬──────────────────────┘ │
         └─────────────┼─────────────────────────┘
                       │
-         ┌────────────┴────────────┐
-         │                         │
-         │ REST API                │ REST API
-         │ (X-API-Key)             │ (X-API-Key)
-         │                         │
-         ▼                         ▼
-┌──────────────────┐      ┌──────────────────┐
-│  alarm-monitor   │      │ alarm-messenger  │
-│                  │      │                  │
-│  - Web-Dashboard │      │  - Mobile App    │
-│  - Einsatzübersicht│    │  - Push-Alarme   │
-│  - Kartendarstellung│   │  - Rückmeldung   │
-│                  │      │  - Gruppierung   │
-└──────────────────┘      └──────────────────┘
-         │                         │
-         ▼                         ▼
-    Dashboard-User          Einsatzkräfte
+         ┌────────────┼─────────────┐
+         │            │             │
+   TARGET_1      TARGET_2  …  TARGET_N
+  Gruppenfilter  Gruppenfilter  (kein Filter)
+  WIL28,WIL29   WIL30,WIL31
+         │            │             │
+         │ REST API   │ REST API    │ REST API
+         │ (X-API-Key)│ (X-API-Key) │ (X-API-Key)
+         ▼            ▼             ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
+│alarm-monitor │ │alarm-monitor │ │ alarm-messenger  │
+│  Standort 1  │ │  Standort 2  │ │                  │
+│              │ │              │ │  - Mobile App    │
+│  Web-Dashboard│ │  Web-Dashboard│ │  - Push-Alarme  │
+│  Kartendarstel│ │  Kartendarstel│ │  - Rückmeldung  │
+└──────────────┘ └──────────────┘ └──────────────────┘
+         │            │             │
+         ▼            ▼             ▼
+   Dashboard-User  Dashboard-User  Einsatzkräfte
+   Standort 1      Standort 2
 ```
 
 ### Datenfluss
@@ -167,9 +173,11 @@ Die Leitstelle sendet Alarmmeldungen als E-Mail mit XML-Anhang an ein Postfach. 
 2. **Polling**: alarm-mail prüft regelmäßig auf neue ungelesene E-Mails
 3. **Parsing**: XML-Struktur wird analysiert und in strukturiertes Format überführt
 4. **Validierung**: Vollständigkeit und Korrektheit der Daten werden geprüft
-5. **Distribution**: Daten werden an konfigurierte Zielsysteme gesendet
-   - **alarm-monitor**: Empfängt vollständige Alarmdaten zur Anzeige
+5. **Distribution**: Daten werden an alle konfigurierten Zielsysteme gesendet
+   - **Gruppenfilter**: Jedes Target kann optional auf bestimmte Dispatch-Codes (z. B. `WIL28,WIL29`) eingeschränkt werden – nur passende Alarme werden weitergeleitet
+   - **alarm-monitor** (ein oder mehrere Instanzen): Empfängt vollständige Alarmdaten zur Anzeige
    - **alarm-messenger**: Empfängt Emergency-Format für mobile Alarmierung
+   - **Markierung als gelesen**: E-Mail wird nur als gelesen markiert, wenn mindestens ein Target den Alarm empfangen hat
 6. **Logging**: Alle Schritte werden protokolliert für Monitoring und Debugging
 
 ### Komponenten
@@ -192,6 +200,8 @@ Die Leitstelle sendet Alarmmeldungen als E-Mail mit XML-Anhang an ein Postfach. 
 - API-Key-Management
 - HTTP-Client mit Timeout und Retry-Logik
 - Separate Fehlerbehandlung pro Target
+- Gruppenfilter-Auswertung: Alarm-Dispatch-Codes gegen konfigurierte Gruppen je Target
+- Multi-Target-Distribution: gleichzeitiger Push an beliebig viele Targets
 
 #### Flask App (`app.py`)
 - REST-API mit Health-Check

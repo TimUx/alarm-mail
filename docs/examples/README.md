@@ -189,6 +189,50 @@ docker compose -f docker-compose-all-in-one.yaml up -d
 
 ---
 
+### Szenario 5: Multi-Target – mehrere Standorte mit Gruppenfilter
+
+Mehrere alarm-monitor-Instanzen an verschiedenen Standorten, jede nur für ihre Alarmierungsgruppen, plus ein alarm-messenger ohne Gruppenfilter.
+
+**Benötigte Dateien:**
+- `env-template-complete.env` als Basis
+
+**Erforderliche .env-Variablen:**
+```bash
+# IMAP
+ALARM_MAIL_IMAP_HOST=imap.mailserver.de
+ALARM_MAIL_IMAP_USERNAME=alarm@feuerwehr.de
+ALARM_MAIL_IMAP_PASSWORD=passwort
+
+# Standort 1: alarm-monitor, nur für WIL28 und WIL29
+ALARM_MAIL_TARGET_1_TYPE=alarm-monitor
+ALARM_MAIL_TARGET_1_URL=https://monitor-standort1.feuerwehr.de
+ALARM_MAIL_TARGET_1_API_KEY=key-standort1
+ALARM_MAIL_TARGET_1_GROUPS=WIL28,WIL29
+
+# Standort 2: alarm-monitor, nur für WIL30 und WIL31
+ALARM_MAIL_TARGET_2_TYPE=alarm-monitor
+ALARM_MAIL_TARGET_2_URL=https://monitor-standort2.feuerwehr.de
+ALARM_MAIL_TARGET_2_API_KEY=key-standort2
+ALARM_MAIL_TARGET_2_GROUPS=WIL30,WIL31
+
+# Messenger: empfängt alle Alarme (kein Gruppenfilter)
+ALARM_MAIL_TARGET_3_TYPE=alarm-messenger
+ALARM_MAIL_TARGET_3_URL=https://messenger.feuerwehr.de
+ALARM_MAIL_TARGET_3_API_KEY=key-messenger
+```
+
+**Verhalten:**
+- Ein Alarm mit Dispatch-Code `WIL28` wird nur an Standort 1 weitergeleitet
+- Ein Alarm mit `WIL30` nur an Standort 2
+- Der alarm-messenger empfängt jeden Alarm unabhängig vom Dispatch-Code
+- E-Mails werden nur als gelesen markiert, wenn mindestens ein Target den Alarm empfangen hat
+
+**Ideal für:**
+- Feuerwehren mit mehreren Standorten und getrennten Alarmierungsgruppen
+- Szenarien mit mehreren alarm-monitor-Instanzen
+
+---
+
 ## ⚙️ Anpassungen
 
 ### Docker Compose anpassen
