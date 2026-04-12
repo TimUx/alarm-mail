@@ -30,7 +30,7 @@ class AlarmMailFetcher:
     def __init__(
         self,
         config: MailConfig,
-        callback: Callable[[bytes], None],
+        callback: Callable[[bytes], bool],
         poll_interval: int = 60,
     ) -> None:
         self.config = config
@@ -114,16 +114,17 @@ class AlarmMailFetcher:
                 if not message_data or not message_data[0]:
                     continue
                 raw_email = message_data[0][1]
-                self.callback(raw_email)
+                mark_as_seen = bool(self.callback(raw_email))
                 self._state.messages_processed += 1
-                try:
-                    server.uid("STORE", uid, "+FLAGS", "(\\Seen)")
-                except imaplib.IMAP4.error as mark_exc:
-                    LOGGER.warning(
-                        "Failed to mark message UID %s as read: %s",
-                        uid.decode() if isinstance(uid, bytes) else uid,
-                        mark_exc,
-                    )
+                if mark_as_seen:
+                    try:
+                        server.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+                    except imaplib.IMAP4.error as mark_exc:
+                        LOGGER.warning(
+                            "Failed to mark message UID %s as read: %s",
+                            uid.decode() if isinstance(uid, bytes) else uid,
+                            mark_exc,
+                        )
         finally:
             self._state.last_poll_time = time.monotonic()
             self._state.last_poll_timestamp = time.time()

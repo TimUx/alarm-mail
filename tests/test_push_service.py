@@ -523,3 +523,197 @@ class TestSSLVerificationWarnings:
             if r.levelno == logging.WARNING and "SSL" in r.message
         ]
         assert not ssl_warnings
+
+
+# ---------------------------------------------------------------------------
+# Tests: push_alarm return value
+# ---------------------------------------------------------------------------
+
+class TestPushAlarmReturnValue:
+    def test_returns_true_when_monitor_target_present(self, mocker):
+        _mock_post(mocker)
+        svc = PushService(alarm_monitor=_monitor_target())
+        result = svc.push_alarm(_ALARM_DATA)
+        assert result is True
+
+    def test_returns_true_when_messenger_target_present(self, mocker):
+        _mock_post(mocker)
+        svc = PushService(alarm_messenger=_messenger_target())
+        result = svc.push_alarm(_ALARM_DATA)
+        assert result is True
+
+    def test_returns_false_for_empty_alarm_data(self, mocker):
+        _mock_post(mocker)
+        svc = PushService(alarm_monitor=_monitor_target())
+        result = svc.push_alarm({})
+        assert result is False
+
+    def test_returns_false_when_no_targets_configured(self, mocker):
+        _mock_post(mocker)
+        svc = PushService()
+        result = svc.push_alarm(_ALARM_DATA)
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: group filter logic
+# ---------------------------------------------------------------------------
+
+class TestGroupFilter:
+    def test_no_filter_accepts_all_alarms(self, mocker):
+        """Target without group filter must accept any alarm."""
+        mock_post = _mock_post(mocker)
+        target = _monitor_target()
+        # groups defaults to [] = no filter
+        svc = PushService(alarm_monitor=target)
+        svc.push_alarm(_ALARM_DATA)
+        mock_post.assert_called_once()
+
+    def test_matching_group_allows_push(self, mocker):
+        """Alarm with a matching dispatch code must be pushed."""
+        from alarm_mail.config import SecretString, TargetConfig
+        mock_post = _mock_post(mocker)
+        target = TargetConfig(
+            url="http://monitor:8000",
+            api_key=SecretString("key"),
+            groups=["MUS11"],
+        )
+        svc = PushService(alarm_monitor=target)
+        result = svc.push_alarm(_ALARM_DATA)
+        mock_post.assert_called_once()
+        assert result is True
+
+    def test_non_matching_group_blocks_push(self, mocker):
+        """Alarm whose codes don't match the target filter must not be pushed."""
+        from alarm_mail.config import SecretString, TargetConfig
+        mock_post = _mock_post(mocker)
+        target = TargetConfig(
+            url="http://monitor:8000",
+            api_key=SecretString("key"),
+            groups=["WIL28"],  # alarm has MUS11, MUS05
+        )
+        svc = PushService(alarm_monitor=target)
+        result = svc.push_alarm(_ALARM_DATA)
+        mock_post.assert_not_called()
+        assert result is False
+
+    def test_group_match_is_case_insensitive(self, mocker):
+        """Group comparison must be case-insensitive."""
+        from alarm_mail.config import SecretString, TargetConfig
+        mock_post = _mock_post(mocker)
+        target = TargetConfig(
+            url="http://monitor:8000",
+            api_key=SecretString("key"),
+            groups=["mus11"],
+        )
+        svc = PushService(alarm_monitor=target)
+        result = svc.push_alarm(_ALARM_DATA)
+        mock_post.assert_called_once()
+        assert result is True
+
+    def test_no_dispatch_codes_in_alarm_does_not_match_filtered_target(self, mocker):
+        """An alarm without dispatch_group_codes must not pass a group filter."""
+        from alarm_mail.config import SecretString, TargetConfig
+        mock_post = _mock_post(mocker)
+        target = TargetConfig(
+            url="http://monitor:8000",
+            api_key=SecretString("key"),
+            groups=["WIL28"],
+        )
+        svc = PushService(alarm_monitor=target)
+        alarm_no_codes = {**_ALARM_DATA, "dispatch_group_codes": None}
+        result = svc.push_alarm(alarm_no_codes)
+        mock_post.assert_not_called()
+        assert result is False
+
+    def test_no_dispatch_codes_matches_unfiltered_target(self, mocker):
+        """An alarm without codes must still reach a target with no group filter."""
+        mock_post = _mock_post(mocker)
+        svc = PushService(alarm_monitor=_monitor_target())
+        alarm_no_codes = {**_ALARM_DATA, "dispatch_group_codes": None}
+        result = svc.push_alarm(alarm_no_codes)
+        mock_post.assert_called_once()
+        assert result is True
+
+    def test_returns_true_when_any_target_matches(self, mocker):
+        """push_alarm returns True when at least one of two targets matches."""
+        from alarm_mail.config import SecretString, TargetConfig
+        mock_post = _mock_post(mocker)
+        target_match = TargetConfig(
+            url="http://monitor1:8000",
+            api_key=SecretString("key1"),
+            groups=["MUS11"],
+        )
+        target_no_match = TargetConfig(
+            url="http://monitor2:8000",
+            api_key=SecretString("key2"),
+            groups=["WIL28"],
+        )
+        svc = PushService(targets=[target_match, target_no_match])
+        result = svc.push_alarm(_ALARM_DATA)
+        assert result is True
+        # Only the matching target should be called
+        assert mock_post.call_count == 1
+        assert "monitor1" in mock_post.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# Tests: numbered extra targets
+# ---------------------------------------------------------------------------
+
+class TestNumberedTargets:
+    def test_numbered_monitor_target_receives_alarm(self, mocker):
+        from alarm_mail.config import SecretString, TargetConfig
+        mock_post = _mock_post(mocker)
+        target = TargetConfig(
+            url="http://extra-monitor:8000",
+            api_key=SecretString("extrakey"),
+            type="alarm-monitor",
+        )
+        svc = PushService(targets=[target])
+        svc.push_alarm(_ALARM_DATA)
+        mock_post.assert_called_once()
+        assert mock_post.call_args.args[0] == "http://extra-monitor:8000/api/alarm"
+
+    def test_numbered_messenger_target_receives_alarm(self, mocker):
+        from alarm_mail.config import SecretString, TargetConfig
+        mock_post = _mock_post(mocker)
+        target = TargetConfig(
+            url="http://extra-messenger:3000",
+            api_key=SecretString("extrakey"),
+            type="alarm-messenger",
+        )
+        svc = PushService(targets=[target])
+        svc.push_alarm(_ALARM_DATA)
+        mock_post.assert_called_once()
+        assert mock_post.call_args.args[0] == "http://extra-messenger:3000/api/emergencies"
+
+    def test_legacy_and_numbered_targets_both_receive_alarm(self, mocker):
+        from alarm_mail.config import SecretString, TargetConfig
+        mock_post = _mock_post(mocker)
+        extra = TargetConfig(
+            url="http://extra-monitor:8000",
+            api_key=SecretString("extrakey"),
+            type="alarm-monitor",
+        )
+        svc = PushService(alarm_monitor=_monitor_target(), targets=[extra])
+        svc.push_alarm(_ALARM_DATA)
+        assert mock_post.call_count == 2
+        called_urls = [c.args[0] for c in mock_post.call_args_list]
+        assert "http://monitor:8000/api/alarm" in called_urls
+        assert "http://extra-monitor:8000/api/alarm" in called_urls
+
+    def test_numbered_target_group_filter_respected(self, mocker):
+        from alarm_mail.config import SecretString, TargetConfig
+        mock_post = _mock_post(mocker)
+        non_matching = TargetConfig(
+            url="http://monitor-other:8000",
+            api_key=SecretString("key"),
+            type="alarm-monitor",
+            groups=["WIL28"],  # alarm has MUS11/MUS05
+        )
+        svc = PushService(targets=[non_matching])
+        result = svc.push_alarm(_ALARM_DATA)
+        mock_post.assert_not_called()
+        assert result is False
+
