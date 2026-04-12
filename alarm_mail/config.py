@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 try:
     from dotenv import load_dotenv
@@ -60,6 +60,8 @@ class TargetConfig:
     api_key: SecretString
     enabled: bool = True
     verify_ssl: bool = True
+    groups: List[str] = field(default_factory=list)
+    type: str = "alarm-monitor"
 
 
 @dataclass
@@ -70,6 +72,7 @@ class AppConfig:
     poll_interval: int = 60
     alarm_monitor: Optional[TargetConfig] = None
     alarm_messenger: Optional[TargetConfig] = None
+    targets: List[TargetConfig] = field(default_factory=list)
     http_timeout: int = 10
     log_level: str = "INFO"
     dedup_ttl: int = 300
@@ -189,6 +192,7 @@ def load_config() -> AppConfig:
             api_key=SecretString(monitor_api_key),
             enabled=True,
             verify_ssl=monitor_verify_ssl,
+            type="alarm-monitor",
         )
         LOGGER.info("Alarm Monitor target configured: %s", monitor_url)
     else:
@@ -212,12 +216,64 @@ def load_config() -> AppConfig:
             api_key=SecretString(messenger_api_key),
             enabled=True,
             verify_ssl=messenger_verify_ssl,
+            type="alarm-messenger",
         )
         LOGGER.info("Alarm Messenger target configured: %s", messenger_url)
     else:
         LOGGER.info("Alarm Messenger target not configured (URL or API key missing)")
 
-    if not alarm_monitor and not alarm_messenger:
+    # Numbered multi-target configuration: ALARM_MAIL_TARGET_<N>_* (optional)
+    targets: List[TargetConfig] = []
+    n = 1
+    while True:
+        target_url = _get_env(f"TARGET_{n}_URL")
+        if not target_url:
+            break
+        target_api_key = _get_env(f"TARGET_{n}_API_KEY")
+        if not target_api_key:
+            LOGGER.warning(
+                "TARGET_%d_URL is set but TARGET_%d_API_KEY is missing – skipping target %d",
+                n, n, n,
+            )
+            n += 1
+            continue
+        if target_url.startswith("http://"):
+            LOGGER.warning(
+                "Target %d URL %s uses plain HTTP. API keys will be transmitted unencrypted. "
+                "Strongly consider using HTTPS.", n, target_url
+            )
+        target_type_raw = (_get_env(f"TARGET_{n}_TYPE") or "alarm-monitor").lower().strip()
+        if target_type_raw not in ("alarm-monitor", "alarm-messenger"):
+            raise MissingConfiguration(
+                f"Invalid value for {ENV_PREFIX}TARGET_{n}_TYPE: '{target_type_raw}'. "
+                "Allowed values: alarm-monitor, alarm-messenger"
+            )
+        target_groups_raw = _get_env(f"TARGET_{n}_GROUPS") or ""
+        target_groups: List[str] = [
+            g.strip().upper()
+            for g in target_groups_raw.split(",")
+            if g.strip()
+        ]
+        target_verify_ssl = (
+            _get_env(f"TARGET_{n}_VERIFY_SSL", default="true") or "true"
+        ).lower() != "false"
+        target = TargetConfig(
+            url=target_url.rstrip('/'),
+            api_key=SecretString(target_api_key),
+            enabled=True,
+            verify_ssl=target_verify_ssl,
+            groups=target_groups,
+            type=target_type_raw,
+        )
+        targets.append(target)
+        group_info = f", groups={target_groups}" if target_groups else ""
+        LOGGER.info(
+            "Target %d configured: type=%s url=%s%s",
+            n, target_type_raw, target_url, group_info,
+        )
+        n += 1
+
+    if not alarm_monitor and not alarm_messenger and not targets:
         LOGGER.warning(
             "No push targets configured. Emails will be parsed but not forwarded."
         )
@@ -227,6 +283,7 @@ def load_config() -> AppConfig:
         poll_interval=poll_interval,
         alarm_monitor=alarm_monitor,
         alarm_messenger=alarm_messenger,
+        targets=targets,
         http_timeout=http_timeout,
         log_level=log_level.upper(),
         dedup_ttl=_get_int_env("DEDUP_TTL", default=300),

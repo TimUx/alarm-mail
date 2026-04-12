@@ -77,6 +77,7 @@ class TestPollOnce:
 
     def test_marks_message_as_seen_after_callback(self, mocker):
         callback = MagicMock()
+        callback.return_value = True
         _, mock_server = self._setup_imap(mocker, uids=b"42")
 
         store_calls = []
@@ -96,6 +97,27 @@ class TestPollOnce:
         assert len(store_calls) == 1
         assert store_calls[0][1] == "+FLAGS"
 
+    def test_does_not_mark_as_seen_when_callback_returns_false(self, mocker):
+        """Message must NOT be marked as seen when callback returns False."""
+        callback = MagicMock(return_value=False)
+        _, mock_server = self._setup_imap(mocker, uids=b"42")
+
+        store_calls = []
+        original_side_effect = mock_server.uid.side_effect
+
+        def recording_handler(command, *args):
+            result = original_side_effect(command, *args)
+            if command == "STORE":
+                store_calls.append(args)
+            return result
+
+        mock_server.uid.side_effect = recording_handler
+
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=callback)
+        fetcher._poll_once()
+
+        assert len(store_calls) == 0
+
     def test_skips_message_silently_on_fetch_failure(self, mocker):
         callback = MagicMock()
         _, mock_server = self._setup_imap(mocker, uids=b"7", fetch_ok=False)
@@ -106,7 +128,7 @@ class TestPollOnce:
     def test_logs_warning_and_continues_if_mark_seen_fails(self, mocker, caplog):
         import logging
 
-        callback = MagicMock()
+        callback = MagicMock(return_value=True)
         raw_email = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
 
         mock_server = MagicMock()

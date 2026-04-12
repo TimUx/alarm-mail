@@ -340,3 +340,75 @@ class TestDedupSQLitePath:
                     AlarmMailApp(_make_config())
         warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
         assert any("Failed to create dedup database directory" in m for m in warning_messages)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _handle_email return value (mark-as-seen signal)
+# ---------------------------------------------------------------------------
+
+_VALID_XML_EMAIL_WITH_GROUPS = (
+    b"From: leitstelle@example.com\r\n"
+    b"To: alarm@example.com\r\n"
+    b"Subject: Einsatzalarmierung\r\n"
+    b"\r\n"
+    + textwrap.dedent("""\
+        <INCIDENT>
+          <ENR>2024-010</ENR>
+          <ESTICHWORT_1>F3Y</ESTICHWORT_1>
+          <DIAGNOSE>Brand</DIAGNOSE>
+          <EBEGINN>08.12.2024 14:30:00</EBEGINN>
+          <STRASSE>Hauptstraße</STRASSE>
+          <ORT>Musterstadt</ORT>
+          <EINSATZMASSNAHMEN>
+            <TME>
+              <BEZEICHNUNG>WIL28 Feuerwehr</BEZEICHNUNG>
+            </TME>
+          </EINSATZMASSNAHMEN>
+        </INCIDENT>
+    """).encode("utf-8")
+)
+
+
+class TestHandleEmailReturnValue:
+    def _make_app(self, push_result: bool = True) -> AlarmMailApp:
+        config = _make_config()
+        app = AlarmMailApp(config)
+        mock_push = MagicMock(return_value=push_result)
+        app.push_service = MagicMock()
+        app.push_service.push_alarm = mock_push
+        return app
+
+    def test_returns_true_when_push_succeeds(self):
+        app = self._make_app(push_result=True)
+        result = app._handle_email(_VALID_XML_EMAIL)
+        assert result is True
+
+    def test_returns_false_when_push_returns_false(self):
+        """When no target matches groups, _handle_email must return False."""
+        app = self._make_app(push_result=False)
+        result = app._handle_email(_VALID_XML_EMAIL)
+        assert result is False
+
+    def test_returns_true_for_non_alarm_email(self):
+        """Emails without valid XML must return True (mark as seen to clear inbox)."""
+        app = self._make_app(push_result=True)
+        result = app._handle_email(_NO_XML_EMAIL)
+        assert result is True
+
+    def test_returns_true_for_duplicate_incident(self):
+        """Duplicate incidents are marked as seen even though push is skipped."""
+        app = self._make_app(push_result=True)
+        app._handle_email(_VALID_XML_EMAIL)  # first call
+        # Inject again before TTL expires
+        result = app._handle_email(_VALID_XML_EMAIL)
+        assert result is True
+
+    def test_returns_true_on_unexpected_exception(self):
+        """An unexpected exception must still return True to avoid infinite retry loops."""
+        config = _make_config()
+        app = AlarmMailApp(config)
+        app.push_service = MagicMock()
+        app.push_service.push_alarm.side_effect = RuntimeError("unexpected")
+        result = app._handle_email(_VALID_XML_EMAIL)
+        assert result is True
+

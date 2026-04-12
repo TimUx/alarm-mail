@@ -427,6 +427,28 @@ Aktiviert die Weiterleitung an den [alarm-messenger](https://github.com/TimUx/al
 
 **Hinweis:** `ALARM_MESSENGER_URL` und `ALARM_MESSENGER_API_KEY` müssen beide gesetzt sein, damit die Integration aktiv ist.
 
+#### 🎯 Multi-Target-Konfiguration – mehrere Instanzen mit Gruppenfilter (Optional)
+
+Wenn mehrere alarm-monitor-Instanzen an verschiedenen Standorten betrieben werden (z. B. verschiedene Feuerwachen mit unterschiedlichen Alarmierungsgruppen), kann jeder Empfänger über nummerierte Variablen `TARGET_<N>_*` konfiguriert werden.
+
+**Vorteile gegenüber den Legacy-Variablen:**
+- Beliebig viele Targets konfigurierbar (N = 1, 2, 3, …)
+- Jeder Target erhält optional einen **Gruppenfilter**: nur Alarme mit passenden Dispatch-Codes werden weitergeleitet
+- **E-Mails werden nur als gelesen markiert**, wenn mindestens ein Target den Alarm tatsächlich erhalten hat
+
+| Variable | Typ | Beschreibung |
+|----------|-----|--------------|
+| `TARGET_<N>_URL` | String | Basis-URL des Targets (Pflicht für Target N) |
+| `TARGET_<N>_API_KEY` | String | API-Schlüssel des Targets ⚠️ Geheim halten! |
+| `TARGET_<N>_TYPE` | String | Typ: `alarm-monitor` (Standard) oder `alarm-messenger` |
+| `TARGET_<N>_GROUPS` | String | Kommaseparierte Dispatch-Codes (z. B. `WIL28,WIL29`)<br>Leer lassen = kein Filter, alle Alarme werden weitergeleitet |
+| `TARGET_<N>_VERIFY_SSL` | Boolean | SSL-Zertifikat prüfen. Standard: `true` |
+
+**Verhalten bei Gruppenfilter:**
+- Alarm-Dispatch-Codes (aus `<TME>/<BEZEICHNUNG>`) werden **case-insensitiv** gegen die konfigurierten Gruppen geprüft.
+- Wenn kein Target den Alarm empfängt (alle Filter greifen), bleibt die E-Mail **ungelesen** im Postfach. Beim nächsten Poll-Zyklus wird sie erneut verarbeitet, sofern neue Targets konfiguriert werden.
+- E-Mails ohne valides `<INCIDENT>`-XML werden immer als gelesen markiert (kein Alarm → Posteingang aufräumen).
+
 #### ⚙️ Weitere optionale Einstellungen
 
 | Variable | Typ | Default | Beschreibung |
@@ -486,6 +508,36 @@ ALARM_MAIL_ALARM_MONITOR_API_KEY=monitor-secret-key-123
 ALARM_MAIL_ALARM_MESSENGER_URL=http://alarm-messenger:3000
 ALARM_MAIL_ALARM_MESSENGER_API_KEY=messenger-secret-key-456
 ```
+
+#### Multi-Target-Konfiguration (mehrere alarm-monitor-Instanzen)
+
+Zwei alarm-monitor-Instanzen an verschiedenen Standorten, jede nur für ihre Alarmierungsgruppen, plus ein alarm-messenger ohne Gruppenfilter:
+
+```bash
+# IMAP Konfiguration
+ALARM_MAIL_IMAP_HOST=imap.mailserver.de
+ALARM_MAIL_IMAP_USERNAME=alarm@feuerwehr.de
+ALARM_MAIL_IMAP_PASSWORD=geheimes-passwort
+
+# Standort 1: Zuständig für WIL28 und WIL29
+ALARM_MAIL_TARGET_1_TYPE=alarm-monitor
+ALARM_MAIL_TARGET_1_URL=https://monitor-standort1.feuerwehr.de
+ALARM_MAIL_TARGET_1_API_KEY=key-standort1
+ALARM_MAIL_TARGET_1_GROUPS=WIL28,WIL29
+
+# Standort 2: Zuständig für WIL30 und WIL31
+ALARM_MAIL_TARGET_2_TYPE=alarm-monitor
+ALARM_MAIL_TARGET_2_URL=https://monitor-standort2.feuerwehr.de
+ALARM_MAIL_TARGET_2_API_KEY=key-standort2
+ALARM_MAIL_TARGET_2_GROUPS=WIL30,WIL31
+
+# Messenger: empfängt alle Alarme (kein Gruppenfilter)
+ALARM_MAIL_TARGET_3_TYPE=alarm-messenger
+ALARM_MAIL_TARGET_3_URL=https://messenger.feuerwehr.de
+ALARM_MAIL_TARGET_3_API_KEY=key-messenger
+```
+
+> **Hinweis:** E-Mails werden nur als gelesen markiert, wenn mindestens ein Target den Alarm empfangen hat. Wenn kein Target für die Alarmgruppen des Einsatzes zuständig ist, bleibt die E-Mail ungelesen und wird beim nächsten Poll-Zyklus erneut geprüft.
 
 ### Sicherheitshinweise für die Konfiguration
 

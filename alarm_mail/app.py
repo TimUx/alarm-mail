@@ -38,6 +38,11 @@ _ENV_VAR_TABLE = [
     ("ALARM_MONITOR_API_KEY",   False, True),
     ("ALARM_MESSENGER_URL",     False, False),
     ("ALARM_MESSENGER_API_KEY", False, True),
+    ("TARGET_<N>_TYPE",         False, False),
+    ("TARGET_<N>_URL",          False, False),
+    ("TARGET_<N>_API_KEY",      False, True),
+    ("TARGET_<N>_GROUPS",       False, False),
+    ("TARGET_<N>_VERIFY_SSL",   False, False),
     ("HTTP_TIMEOUT",                  False, False),
     ("LOG_LEVEL",                     False, False),
     ("ALARM_MONITOR_VERIFY_SSL",      False, False),
@@ -75,6 +80,7 @@ class AlarmMailApp:
         self.push_service = PushService(
             alarm_monitor=config.alarm_monitor,
             alarm_messenger=config.alarm_messenger,
+            targets=config.targets,
             http_timeout=config.http_timeout,
         )
         self.mail_fetcher: Optional[AlarmMailFetcher] = None
@@ -151,13 +157,19 @@ class AlarmMailApp:
             LOGGER.info("Stopped mail polling thread")
         self.push_service.close()
 
-    def _handle_email(self, raw_email: bytes) -> None:
-        """Process a new email: parse and push to targets."""
+    def _handle_email(self, raw_email: bytes) -> bool:
+        """Process a new email: parse and push to targets.
+
+        Returns ``True`` when the email should be marked as read on the IMAP
+        server.  Returns ``False`` when a valid alarm was found but no
+        configured target's group filter matched, so the email should remain
+        unread for a potential re-delivery attempt.
+        """
         try:
             alarm_data = parse_alarm(raw_email)
             if alarm_data is None:
                 LOGGER.warning("Received email without valid INCIDENT XML")
-                return
+                return True  # not an alarm email – mark as seen to clear inbox
 
             incident_number = alarm_data.get("incident_number")
             if incident_number:
@@ -170,7 +182,7 @@ class AlarmMailApp:
                                 "Duplicate incident (same number seen within last %d seconds), skipping push",
                                 self._dedup_ttl,
                             )
-                            return
+                            return True  # already handled – mark as seen
                     self._dedup_cache[incident_number] = now
                     # Trim cache to max size (oldest first)
                     while len(self._dedup_cache) > _DEDUP_MAX_SIZE:
@@ -186,10 +198,17 @@ class AlarmMailApp:
             with self._messages_lock:
                 self._messages_processed += 1
 
-            self.push_service.push_alarm(alarm_data)
+            pushed = bool(self.push_service.push_alarm(alarm_data))
+            if not pushed:
+                LOGGER.info(
+                    "Alarm %s did not match any target group filter – email will remain unread",
+                    alarm_data.get("incident_number", "unknown"),
+                )
+            return pushed
 
         except Exception as exc:
             LOGGER.exception("Error handling email: %s", exc)
+            return True  # mark as seen on unexpected errors to avoid infinite retry
 
 
 def create_app() -> Flask:
@@ -232,6 +251,8 @@ def create_app() -> Flask:
             targets.append("alarm-monitor")
         if config.alarm_messenger:
             targets.append("alarm-messenger")
+        for idx, t in enumerate(config.targets, start=1):
+            targets.append(f"{t.type}[{idx}]")
 
         return jsonify({
             "service": "alarm-mail",
@@ -260,6 +281,9 @@ def create_app() -> Flask:
             target_names.append("alarm-monitor")
         if config.alarm_messenger:
             target_names.append("alarm-messenger")
+        for idx in range(1, len(config.targets) + 1):
+            t = config.targets[idx - 1]
+            target_names.append(f"{t.type}[{idx}]")
 
         lines = [
             "# HELP alarm_mail_messages_processed_total"
