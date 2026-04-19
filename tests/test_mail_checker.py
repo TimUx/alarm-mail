@@ -118,12 +118,83 @@ class TestPollOnce:
 
         assert len(store_calls) == 0
 
+    def test_fetch_uses_body_peek_to_preserve_unread_state(self, mocker):
+        callback = MagicMock(return_value=False)
+        _, mock_server = self._setup_imap(mocker, uids=b"42")
+
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=callback)
+        fetcher._poll_once()
+
+        fetch_calls = [
+            call_args.args
+            for call_args in mock_server.uid.call_args_list
+            if call_args.args and call_args.args[0] == "FETCH"
+        ]
+        assert fetch_calls
+        assert fetch_calls[0][2] == "(BODY.PEEK[])"
+        store_calls = [
+            call_args.args
+            for call_args in mock_server.uid.call_args_list
+            if call_args.args and call_args.args[0] == "STORE"
+        ]
+        assert not store_calls
+
     def test_skips_message_silently_on_fetch_failure(self, mocker):
         callback = MagicMock()
         _, mock_server = self._setup_imap(mocker, uids=b"7", fetch_ok=False)
         fetcher = AlarmMailFetcher(config=_make_config(), callback=callback)
         fetcher._poll_once()
         callback.assert_not_called()
+
+    def test_extracts_payload_from_fetch_response_tuples(self, mocker):
+        callback = MagicMock(return_value=False)
+        raw_email = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
+
+        mock_server = MagicMock()
+        mock_server.login.return_value = ("OK", [b"Logged in"])
+        mock_server.select.return_value = ("OK", [b"1"])
+
+        def uid_handler(command, *args):
+            if command == "SEARCH":
+                return ("OK", [b"5"])
+            if command == "FETCH":
+                return ("OK", [(b"5 FLAGS (\\Seen)", None), (b"5 (BODY[] {3})", raw_email), b")"])
+            if command == "STORE":
+                return ("OK", [None])
+            return ("OK", [None])
+
+        mock_server.uid.side_effect = uid_handler
+        mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4_SSL", return_value=mock_server)
+
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=callback)
+        fetcher._poll_once()
+
+        callback.assert_called_once_with(raw_email)
+
+    def test_extracts_payload_when_body_tuple_precedes_flags(self, mocker):
+        callback = MagicMock(return_value=False)
+        raw_email = b"From: test@example.com\r\nSubject: Test\r\n\r\nBody"
+
+        mock_server = MagicMock()
+        mock_server.login.return_value = ("OK", [b"Logged in"])
+        mock_server.select.return_value = ("OK", [b"1"])
+
+        def uid_handler(command, *args):
+            if command == "SEARCH":
+                return ("OK", [b"5"])
+            if command == "FETCH":
+                return ("OK", [(b"5 (BODY[] {3})", raw_email), (b"5 FLAGS (\\Seen)", None), b")"])
+            if command == "STORE":
+                return ("OK", [None])
+            return ("OK", [None])
+
+        mock_server.uid.side_effect = uid_handler
+        mocker.patch("alarm_mail.mail_checker.imaplib.IMAP4_SSL", return_value=mock_server)
+
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=callback)
+        fetcher._poll_once()
+
+        callback.assert_called_once_with(raw_email)
 
     def test_logs_warning_and_continues_if_mark_seen_fails(self, mocker, caplog):
         import logging

@@ -107,13 +107,26 @@ class AlarmMailFetcher:
             uids = [uid for uid in data[0].split() if uid]
             for uid in uids:
                 LOGGER.info("Fetching message UID %s", uid.decode() if isinstance(uid, bytes) else uid)
-                result, message_data = server.uid("FETCH", uid, "(RFC822)")
+                # Use BODY.PEEK to avoid servers implicitly setting \Seen on fetch.
+                result, message_data = server.uid("FETCH", uid, "(BODY.PEEK[])")
                 if result != "OK":
                     LOGGER.warning("Failed to fetch message UID %s", uid)
                     continue
-                if not message_data or not message_data[0]:
+                if not message_data:
                     continue
-                raw_email = message_data[0][1]
+                raw_email = None
+                for item in message_data:
+                    if not isinstance(item, tuple) or len(item) <= 1:
+                        continue
+                    if isinstance(item[1], bytes):
+                        raw_email = item[1]
+                        break
+                    if isinstance(item[1], bytearray):
+                        raw_email = bytes(item[1])
+                        break
+                if raw_email is None:
+                    LOGGER.warning("No message payload found for message UID %s", uid)
+                    continue
                 mark_as_seen = bool(self.callback(raw_email))
                 self._state.messages_processed += 1
                 if mark_as_seen:
