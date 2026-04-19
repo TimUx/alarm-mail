@@ -118,6 +118,21 @@ class TestPollOnce:
 
         assert len(store_calls) == 0
 
+    def test_fetch_uses_body_peek_to_preserve_unread_state(self, mocker):
+        callback = MagicMock(return_value=False)
+        _, mock_server = self._setup_imap(mocker, uids=b"42")
+
+        fetcher = AlarmMailFetcher(config=_make_config(), callback=callback)
+        fetcher._poll_once()
+
+        fetch_calls = [
+            call_args.args
+            for call_args in mock_server.uid.call_args_list
+            if call_args.args and call_args.args[0] == "FETCH"
+        ]
+        assert fetch_calls
+        assert fetch_calls[0][2] == "(BODY.PEEK[])"
+
     def test_skips_message_silently_on_fetch_failure(self, mocker):
         callback = MagicMock()
         _, mock_server = self._setup_imap(mocker, uids=b"7", fetch_ok=False)

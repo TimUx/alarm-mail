@@ -107,7 +107,8 @@ class AlarmMailFetcher:
             uids = [uid for uid in data[0].split() if uid]
             for uid in uids:
                 LOGGER.info("Fetching message UID %s", uid.decode() if isinstance(uid, bytes) else uid)
-                result, message_data = server.uid("FETCH", uid, "(RFC822)")
+                # Use BODY.PEEK to avoid servers implicitly setting \Seen on fetch.
+                result, message_data = server.uid("FETCH", uid, "(BODY.PEEK[])")
                 if result != "OK":
                     LOGGER.warning("Failed to fetch message UID %s", uid)
                     continue
