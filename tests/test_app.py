@@ -389,6 +389,21 @@ class TestHandleEmailReturnValue:
         result = app._handle_email(_VALID_XML_EMAIL)
         assert result is False
 
+    def test_no_match_is_not_added_to_dedup_history(self):
+        """Incidents without matching target groups must not become duplicates."""
+        app = self._make_app(push_result=False)
+        first = app._handle_email(_VALID_XML_EMAIL)
+        second = app._handle_email(_VALID_XML_EMAIL)
+        assert first is False
+        assert second is False
+        assert app.push_service.push_alarm.call_count == 2
+        assert (
+            app.push_service.push_alarm.call_args_list[0].args[0]
+            == app.push_service.push_alarm.call_args_list[1].args[0]
+        )
+        assert app.push_service.push_alarm.call_args_list[0].args[0]["incident_number"] == "2024-001"
+        assert "2024-001" not in app._dedup_cache
+
     def test_returns_true_for_non_alarm_email(self):
         """Emails without valid XML must return True (mark as seen to clear inbox)."""
         app = self._make_app(push_result=True)
@@ -411,4 +426,3 @@ class TestHandleEmailReturnValue:
         app.push_service.push_alarm.side_effect = RuntimeError("unexpected")
         result = app._handle_email(_VALID_XML_EMAIL)
         assert result is True
-
