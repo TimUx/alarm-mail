@@ -161,9 +161,10 @@ class AlarmMailApp:
         """Process a new email: parse and push to targets.
 
         Returns ``True`` when the email should be marked as read on the IMAP
-        server.  Returns ``False`` when a valid alarm was found but no
+        server. Returns ``False`` when a valid alarm was found but no
         configured target's group filter matched, so the email should remain
-        unread for a potential re-delivery attempt.
+        unread for a potential re-delivery attempt and is not added to dedup
+        history.
         """
         try:
             alarm_data = parse_alarm(raw_email)
@@ -183,11 +184,6 @@ class AlarmMailApp:
                                 self._dedup_ttl,
                             )
                             return True  # already handled – mark as seen
-                    self._dedup_cache[incident_number] = now
-                    # Trim cache to max size (oldest first)
-                    while len(self._dedup_cache) > _DEDUP_MAX_SIZE:
-                        self._dedup_cache.popitem(last=False)
-                self._dedup_db_insert(incident_number, now)
 
             LOGGER.info(
                 "Parsed alarm: %s - %s",
@@ -204,6 +200,16 @@ class AlarmMailApp:
                     "Alarm %s did not match any target group filter – email will remain unread",
                     alarm_data.get("incident_number", "unknown"),
                 )
+                return False
+
+            if incident_number:
+                now = time.time()
+                with self._dedup_lock:
+                    self._dedup_cache[incident_number] = now
+                    # Trim cache to max size (oldest first)
+                    while len(self._dedup_cache) > _DEDUP_MAX_SIZE:
+                        self._dedup_cache.popitem(last=False)
+                self._dedup_db_insert(incident_number, now)
             return pushed
 
         except Exception as exc:
