@@ -128,10 +128,10 @@ class PushService:
 
         done, _ = concurrent.futures.wait(futures_map.keys())
         for future in done:
-            target = futures_map[future]
+            target_name = futures_map[future]
             exc = future.exception()
             if exc is not None:
-                LOGGER.error("Unhandled error pushing to %s: %s", target, exc)
+                LOGGER.error("Unhandled error pushing to %s: %s", target_name, exc)
 
         return True
 
