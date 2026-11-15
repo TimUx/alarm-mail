@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import imaplib
 import threading
-import time
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -278,8 +277,10 @@ class TestStartStopIsRunning:
         ready = threading.Event()
 
         def slow_run():
+            # Like the real loop: run until stop() sets the event. A fixed
+            # sleep as long as stop()'s join timeout made the test racy.
             ready.set()
-            time.sleep(5)
+            fetcher._stop_event.wait(timeout=10)
 
         mocker.patch.object(AlarmMailFetcher, "_run", side_effect=slow_run)
         fetcher = _make_fetcher()
@@ -292,8 +293,10 @@ class TestStartStopIsRunning:
         ready = threading.Event()
 
         def slow_run():
+            # Like the real loop: run until stop() sets the event. A fixed
+            # sleep as long as stop()'s join timeout made the test racy.
             ready.set()
-            time.sleep(5)
+            fetcher._stop_event.wait(timeout=10)
 
         mocker.patch.object(AlarmMailFetcher, "_run", side_effect=slow_run)
         fetcher = _make_fetcher()
